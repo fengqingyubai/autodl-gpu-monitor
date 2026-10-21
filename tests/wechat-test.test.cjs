@@ -13,7 +13,7 @@ test('WeChat template sends correct user and fields and caches token', async () 
     calls.push({ url, init });
     return ok(url.includes('/token?') ? { access_token: 'token', expires_in: 7200 } : { errcode: 0 });
   });
-  await sender.send(config, { title: '测试', content: '内容' });
+  await sender.send(config, { title: '测试', content: '内容', host: '重庆A区 / 745机', instanceId: 'instance-123', spec: 'RTX 4090 × 1' });
   await sender.send(config, { title: '开机成功', content: '实例' });
   assert.equal(calls.length, 3);
   const payload = JSON.parse(calls[1].init.body);
@@ -21,8 +21,11 @@ test('WeChat template sends correct user and fields and caches token', async () 
   assert.equal(payload.template_id, config.templateId);
   assert.equal('url' in payload, false, 'notification text must not link to the AutoDL console');
   assert.equal('miniprogram' in payload, false);
-  assert.deepEqual(Object.keys(payload.data), ['title', 'content', 'time']);
+  assert.deepEqual(Object.keys(payload.data), ['title', 'content', 'host', 'instance', 'spec', 'time']);
   assert.equal(payload.data.content.value, '内容');
+  assert.equal(payload.data.host.value, '重庆A区 / 745机');
+  assert.equal(payload.data.instance.value, 'instance-123');
+  assert.equal(payload.data.spec.value, 'RTX 4090 × 1');
 });
 test('only explicit invalid-token responses retry once; config changes acquire own token', async () => {
   const values = [{ access_token: 'old' }, { errcode: 42001 }, { access_token: 'fresh' }, { errcode: 0 },

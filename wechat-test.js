@@ -51,6 +51,9 @@
         data: {
           title: { value: String(message.title || 'AutoDL 通知').slice(0, 100) },
           content: { value: String(message.content || '').slice(0, 1000) },
+          host: { value: String(message.host || '未提供') },
+          instance: { value: String(message.instanceId || '未提供') },
+          spec: { value: String(message.spec || '未提供') },
           time: { value: new Date(now()).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }
         } });
       for (let attempt = 0; attempt < 2; attempt++) {

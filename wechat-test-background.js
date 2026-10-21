@@ -16,7 +16,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
   if (request.action !== 'wechatTestSend' || sender.tab) return;
-  sendWechatTestNotification({ title: 'AutoDL 测试通知', content: '这是一条测试消息。收到后，说明微信测试号通知配置可用。' }, true)
+  sendWechatTestNotification({ title: 'AutoDL 测试通知', content: '通知配置成功',
+    host: '测试主机（非真实实例）', instanceId: 'test-instance', spec: 'RTX 4090 × 1（示例）' }, true)
     .then(() => respond({ success: true }), error => respond({ success: false, error: error.message }));
   return true;
 });

@@ -474,7 +474,8 @@ async function handleInstanceStatus(data, tabId) {
 async function sendEmailNotification(instanceData) {
   try {
     await sendWechatTestNotification({ title: 'AutoDL 开机成功',
-      content: `${instanceData.instanceName || ''}\n${instanceData.spec || ''}` });
+      content: '实例已带 GPU 运行', host: instanceData.host || instanceData.instanceName,
+      instanceId: instanceData.instanceId, spec: instanceData.spec });
   } catch (error) {
     chrome.notifications.create({ type: 'basic', iconUrl: 'icon128.png',
       title: '微信测试号通知失败', message: error.message });

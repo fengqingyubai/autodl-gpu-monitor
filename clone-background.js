@@ -218,7 +218,8 @@ chrome.alarms.onAlarm.addListener(async alarm => {
           await saveCloneJob({ ...latest, phase: 'success', newInstanceId: instance.id,
             message: `克隆实例 ${instance.id} 已带 GPU 运行，监控结束` });
           await cloneNotice('AutoDL 克隆开机成功', `${instance.host}，新实例 ${instance.id}`);
-          await sendEmailNotification({ instanceName: `${instance.host} / ${instance.id}`, spec: instance.spec });
+          await sendEmailNotification({ instanceName: `${instance.host} / ${instance.id}`,
+            host: instance.host, instanceId: instance.id, spec: instance.spec });
         } else if (/失败|异常/.test(instance.status)) {
           await saveCloneJob({ ...latest, phase: 'uncertain', message: `新实例 ${instance.id} 状态：${instance.status}，请检查；不会重复创建` });
         } else await saveCloneJob({ ...latest, phase: 'submitted', newInstanceId: instance.id,
