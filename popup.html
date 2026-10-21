@@ -136,6 +136,33 @@
 </head>
 <body>
   <h2>AutoDL GPU 监控</h2>
+
+  <section style="border:1px solid #c7d2fe;padding:12px;border-radius:8px;margin-bottom:18px">
+    <h3 style="margin-top:0">同地区自动克隆</h3>
+    <p style="font-size:12px">先在已关机源实例的“更多 → 克隆实例”勾选数据盘，点击继续。在克隆页打开插件。</p>
+    <button id="cloneRead" type="button">读取当前克隆页</button>
+    <p id="cloneSource" style="font-size:12px;overflow-wrap:anywhere">未读取源实例</p>
+    <label for="cloneModels">GPU 型号（按住 Ctrl 多选）</label>
+    <select id="cloneModels" multiple size="5"></select>
+    <label for="cloneCount">GPU 数量</label>
+    <select id="cloneCount"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>10</option><option>12</option></select>
+    <label for="cloneMaxPrice">整台实例价格上限（元/小时，所有卡合计）</label>
+    <input id="cloneMaxPrice" type="number" min="0.01" step="0.01" placeholder="例如 3.00" required>
+    <label for="cloneInterval">刷新间隔（秒，至少 10）</label>
+    <input id="cloneInterval" type="number" value="15" min="10" max="3600" step="1">
+    <p style="font-size:12px">仅按量计费；强制复制系统盘和数据盘；不自动增加付费数据盘容量。</p>
+    <label><input id="clonePreview" type="checkbox" checked style="width:auto">仅预览，选中主机后停止（不创建）</label>
+    <p style="font-size:12px">取消预览后，启动即授权在所填价格上限内创建并开机一个实例。提交不明时锁定，不会自动重试。</p>
+    <div class="button-group">
+      <button id="cloneStart" type="button" style="background:#365cf5;color:white">开始克隆监控</button>
+      <button id="cloneStop" type="button" disabled>停止克隆监控</button>
+    </div>
+    <p id="cloneStatus" role="status" style="font-size:12px;overflow-wrap:anywhere">未启动</p>
+    <button id="cloneUnlock" type="button" hidden>已核实控制台，解除提交锁定</button>
+    <p style="font-size:12px">微信/邮箱通知在下方设置。保持标签页和浏览器运行，避免标签页休眠。</p>
+  </section>
+  <h3>原实例开机监控</h3>
+
   
   <div class="form-group">
     <label>选择实例（可多选）</label>
@@ -258,6 +285,8 @@
     4. 插件会自动检测 GPU 并执行开机操作
   </div>
   
+  <script src="clone-core.js"></script>
   <script src="popup.js"></script>
+  <script src="clone-popup.js"></script>
 </body>
 </html>

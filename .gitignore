@@ -45,3 +45,5 @@ yarn-error.log*
 # Temporary files
 *.tmp
 .cache/
+node_modules/
+__pycache__/

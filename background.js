@@ -6,6 +6,16 @@ let checkInterval = 5; // 秒
 let intervalId = null;
 
 let checkInProgress = false;
+let legacyCloneLocked = true;
+chrome.storage.local.get('cloneMonitorJob').then(result => {
+  const phase = result.cloneMonitorJob?.phase;
+  legacyCloneLocked = ['watching', 'submitting', 'submitted', 'uncertain'].includes(phase);
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.cloneMonitorJob) {
+    legacyCloneLocked = ['watching', 'submitting', 'submitted', 'uncertain'].includes(changes.cloneMonitorJob.newValue?.phase);
+  }
+});
 const instanceOperationLocks = new Set();
 
 const EXPECTED_CONTENT_SCRIPT_VERSION = '2026-01-19-8';
@@ -155,6 +165,10 @@ async function ensureContentScript(tabId) {
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "startMonitoring") {
+    if (legacyCloneLocked) {
+      sendResponse({ success: false, error: '请先停止克隆任务并核实提交结果' });
+      return false;
+    }
     monitoringEnabled = true;
     // 支持单个或多个实例
     targetInstanceNames = request.instanceNames || (request.instanceName ? [request.instanceName] : []);
@@ -241,6 +255,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // 检查 GPU 状态
 async function checkGPUStatus() {
+  if (!monitoringEnabled || legacyCloneLocked) return;
   if (checkInProgress) {
     return;
   }
@@ -577,3 +592,5 @@ async function sendEmailViaAPI(emailData) {
     });
   }
 }
+
+importScripts('clone-background.js');

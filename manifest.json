@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "AutoDL GPU 自动抢机助手",
-  "version": "1.0.0",
-  "description": "自动监控 AutoDL GPU 状态，检测到可用时自动开机",
+  "version": "1.1.0",
+  "description": "监控实例开机，或按 GPU 型号、数量和价格上限在源地区克隆实例（复制数据盘）",
   "permissions": [
     "storage",
     "notifications",
     "scripting",
-    "tabs"
+    "tabs",
+    "alarms"
   ],
   "host_permissions": [
     "https://www.autodl.com/*",
@@ -19,8 +20,23 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.autodl.com/console/instance/list*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.autodl.com/console/instance/list*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.autodl.com/cloneInstance*",
+        "https://www.autodl.com/console/instance/list*"
+      ],
+      "js": [
+        "clone-core.js",
+        "clone-page.js"
+      ],
       "run_at": "document_idle"
     }
   ],

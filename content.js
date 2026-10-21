@@ -109,6 +109,9 @@ function closeTimedShutdownIfPresent() {
 }
 
 function clickConfirmOnce() {
+  if (!window.__AUTODL_ACTIVE_INSTANCE_ACTION) return false;
+  const dialogs = Array.from(document.querySelectorAll('.el-dialog, .el-message-box')).filter(isElementVisible);
+  if (dialogs.some(e => (e.innerText || '').includes('克隆'))) return false;
   if (closeTimedShutdownIfPresent()) return true;
   if (closeNotificationsIfPresent()) return true;
 
@@ -147,6 +150,10 @@ function clickConfirmOnce() {
 }
 
 async function autoHandlePrompts() {
+  if (!window.__AUTODL_ACTIVE_INSTANCE_ACTION) return;
+  const cloneDialog = Array.from(document.querySelectorAll('.el-dialog, .el-message-box'))
+    .some(e => isElementVisible(e) && (e.innerText || '').includes('克隆'));
+  if (cloneDialog) return;
   if (closeTimedShutdownIfPresent()) return;
   if (closeNotificationsIfPresent()) return;
 
@@ -288,6 +295,12 @@ async function selectGpuModeIfPresent() {
 }
 
 async function clickActionInRow(row, actionText, beforeConfirm) {
+  window.__AUTODL_ACTIVE_INSTANCE_ACTION = true;
+  try { return await performActionInRow(row, actionText, beforeConfirm); }
+  finally { window.__AUTODL_ACTIVE_INSTANCE_ACTION = false; }
+}
+
+async function performActionInRow(row, actionText, beforeConfirm) {
   const directButtons = Array.from(row.querySelectorAll('button')).filter(btn => btn && !btn.disabled);
   const directExact = directButtons.find(btn => normalizeText(btn.innerText) === normalizeText(actionText));
   const direct = directExact || directButtons.find(btn => matchActionText(btn.innerText, actionText));
