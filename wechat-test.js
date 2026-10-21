@@ -48,7 +48,7 @@
     async function send(settings, message) {
       const config = validate(settings);
       const body = JSON.stringify({ touser: config.openId, template_id: config.templateId,
-        url: 'https://www.autodl.com/console/instance/list', data: {
+        data: {
           title: { value: String(message.title || 'AutoDL 通知').slice(0, 100) },
           content: { value: String(message.content || '').slice(0, 1000) },
           time: { value: new Date(now()).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }

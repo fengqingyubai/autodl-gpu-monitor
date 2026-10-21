@@ -19,6 +19,8 @@ test('WeChat template sends correct user and fields and caches token', async () 
   const payload = JSON.parse(calls[1].init.body);
   assert.equal(payload.touser, config.openId);
   assert.equal(payload.template_id, config.templateId);
+  assert.equal('url' in payload, false, 'notification text must not link to the AutoDL console');
+  assert.equal('miniprogram' in payload, false);
   assert.deepEqual(Object.keys(payload.data), ['title', 'content', 'time']);
   assert.equal(payload.data.content.value, '内容');
 });
