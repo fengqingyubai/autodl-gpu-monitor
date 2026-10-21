@@ -6,6 +6,11 @@ const cloneWait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const readCloneJob = async () => (await chrome.storage.local.get(CLONE_JOB_KEY))[CLONE_JOB_KEY];
 async function saveCloneJob(job) {
   await chrome.storage.local.set({ [CLONE_JOB_KEY]: { ...job, updatedAt: Date.now() } });
+  const badge = { watching: ['ON', '#13854b'], submitting: ['…', '#2563eb'], submitted: ['…', '#2563eb'],
+    error: ['ERR', '#dc2626'], uncertain: ['!', '#b45309'], success: ['OK', '#13854b'] }[job.phase];
+  await chrome.action?.setBadgeText({ text: badge?.[0] || '' });
+  if (badge) await chrome.action?.setBadgeBackgroundColor({ color: badge[1] });
+  await chrome.action?.setTitle({ title: `AutoDL GPU 监控：${job.message}` });
 }
 async function cloneNotice(title, message) {
   await chrome.notifications.create({ type: 'basic', iconUrl: 'icon128.png', title, message });
@@ -57,7 +62,7 @@ async function handleCloneMessage(request, sender) {
     stopLegacyMonitor();
     job = { id: crypto.randomUUID(), phase: 'watching', tabId: request.tabId, context,
       config: cfg, baseline: baseline.map(instance => instance.id), createdAt: Date.now(),
-      message: cfg.preview ? '预览模式：仅筛选和选中主机，不会提交' : '正在扫描同地区可用主机' };
+      round: 0, message: '监控已开启：正在扫描同地区可用主机' };
     await saveCloneJob(job);
     await chrome.alarms.create('clone-watchdog', { periodInMinutes: 0.5 });
     await sendClonePage(job.tabId, { action: 'cloneRun' });
@@ -98,13 +103,10 @@ async function handleCloneMessage(request, sender) {
   }
   if (job.phase !== 'watching') return { success: false, error: '任务已停止或已提交' };
   if (request.action === 'cloneProgress') {
-    await saveCloneJob({ ...job, message: request.message });
-  } else if (request.action === 'clonePreview') {
-    await saveCloneJob({ ...job, phase: 'preview', selected: request.selected,
-      message: `已选中 ${request.selected.name} ${request.selected.model}，总价 ￥${request.selected.total}/小时。预览完成，未提交。` });
-    await cloneNotice('AutoDL 克隆预览完成', `${request.selected.name}，￥${request.selected.total}/小时；未创建实例`);
+    await saveCloneJob({ ...job, message: request.message, stage: request.stage,
+      nextCheckAt: request.nextCheckAt || null, round: (job.round || 0) + (request.incrementRound ? 1 : 0) });
   } else if (request.action === 'cloneReserve') {
-    if (job.config.preview) throw new Error('预览任务禁止提交');
+    if (job.config.preview === true) throw new Error('旧版预览任务需要重新启动');
     if (!request.selected?.id || !job.config.models.includes(request.selected.model) ||
         !Number.isFinite(request.selected.total) || !Number.isFinite(request.selected.price) ||
         request.selected.total > job.config.maxPrice || request.selected.total <= 0 ||
@@ -116,7 +118,7 @@ async function handleCloneMessage(request, sender) {
 }
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
   const actions = ['cloneStatus', 'cloneStart', 'cloneStop', 'cloneUnlock', 'cloneJob', 'clonePermit',
-    'cloneProgress', 'clonePreview', 'cloneReserve', 'cloneClicked', 'cloneError'];
+    'cloneProgress', 'cloneReserve', 'cloneClicked', 'cloneError'];
   if (!actions.includes(request.action)) return false;
   // Serialize reserve, stop and progress mutations, including across different tabs.
   cloneQueue = cloneQueue.then(() => handleCloneMessage(request, sender))

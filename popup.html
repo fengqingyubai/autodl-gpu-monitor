@@ -11,17 +11,17 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 0;
     }
-    
+
     h2 {
       margin: 0 0 16px 0;
       font-size: 18px;
       color: #333;
     }
-    
+
     .form-group {
       margin-bottom: 12px;
     }
-    
+
     label {
       display: block;
       margin-bottom: 4px;
@@ -29,7 +29,7 @@
       color: #666;
       font-weight: 500;
     }
-    
+
     input, select {
       width: 100%;
       padding: 8px;
@@ -38,18 +38,18 @@
       font-size: 13px;
       box-sizing: border-box;
     }
-    
+
     input:focus, select:focus {
       outline: none;
       border-color: #4CAF50;
     }
-    
+
     .button-group {
       display: flex;
       gap: 8px;
       margin-top: 16px;
     }
-    
+
     button {
       flex: 1;
       padding: 10px;
@@ -60,35 +60,35 @@
       cursor: pointer;
       transition: all 0.2s;
     }
-    
+
     #startBtn {
       background-color: #4CAF50;
       color: white;
     }
-    
+
     #startBtn:hover {
       background-color: #45a049;
     }
-    
+
     #startBtn:disabled {
       background-color: #ccc;
       cursor: not-allowed;
     }
-    
+
     #stopBtn {
       background-color: #f44336;
       color: white;
     }
-    
+
     #stopBtn:hover {
       background-color: #da190b;
     }
-    
+
     #stopBtn:disabled {
       background-color: #ccc;
       cursor: not-allowed;
     }
-    
+
     .status {
       margin-top: 16px;
       padding: 12px;
@@ -96,33 +96,33 @@
       border-radius: 4px;
       font-size: 13px;
     }
-    
+
     .status-item {
       margin-bottom: 6px;
     }
-    
+
     .status-item:last-child {
       margin-bottom: 0;
     }
-    
+
     .status-label {
       font-weight: 500;
       color: #666;
     }
-    
+
     .status-value {
       color: #333;
     }
-    
+
     .status-running {
       color: #4CAF50;
       font-weight: 600;
     }
-    
+
     .status-stopped {
       color: #999;
     }
-    
+
     .info {
       margin-top: 12px;
       padding: 10px;
@@ -132,13 +132,42 @@
       font-size: 12px;
       color: #1976D2;
     }
+
+    [hidden] { display: none !important; }
+    body { width: 380px; color: #172033; background: #fff; }
+    .app-header { position: sticky; top: 0; z-index: 5; background: white; padding: 12px 0; }
+    .app-header h2 { font-size: 21px; margin: 0 0 12px; }
+    .app-header h2 small { font-size: 11px; font-weight: 400; color: #64748b; }
+    nav { display: flex; gap: 4px; padding: 4px; border-radius: 9px; background: #eef2f7; }
+    nav button { padding: 10px 5px; color: #475569; background: transparent; }
+    nav button[aria-selected="true"] { color: #fff; background: #365cf5; box-shadow: 0 2px 5px #365cf533; }
+    .state-card { background: #f1f5f9; border: 1px solid #dbe3ec; border-left: 5px solid #94a3b8; padding: 14px; border-radius: 8px; margin: 8px 0 16px; }
+    .state-card strong { display: block; font-size: 18px; }
+    .state-card p { font-size: 13px; margin: 8px 0; overflow-wrap: anywhere; line-height: 1.6; }
+    .state-card small { display: block; font-size: 12px; line-height: 1.8; }
+    .state-card[data-state="watching"], .state-card[data-state="success"] { background: #eaf8ef; border-color: #b1ddc1; border-left-color: #16834a; color: #145c36; }
+    .state-card[data-state="starting"], .state-card[data-state="submitting"], .state-card[data-state="submitted"] { background: #edf3ff; border-left-color: #365cf5; color: #234b9b; }
+    .state-card[data-state="error"], .state-card[data-state="uncertain"] { background: #fff1f1; border-left-color: #dc2626; color: #9f1b1b; }
+    #cloneStart { flex: 2; } #cloneStop { flex: 1; background: #fee2e2; color: #b91c1c; }
+    button:disabled { opacity: .55; cursor: default; }
+    label { margin-top: 12px; } .muted { font-size: 12px; color: #64748b; }
   </style>
 </head>
 <body>
-  <h2>AutoDL GPU 监控</h2>
-
-  <section style="border:1px solid #c7d2fe;padding:12px;border-radius:8px;margin-bottom:18px">
-    <h3 style="margin-top:0">同地区自动克隆</h3>
+  <header class="app-header">
+    <h2>AutoDL GPU 监控 <small>1.1.2</small></h2>
+    <nav role="tablist" aria-label="监控模式">
+      <button role="tab" data-panel="clone" aria-selected="true">自动克隆</button>
+      <button role="tab" data-panel="legacy" aria-selected="false">原实例开机</button>
+      <button role="tab" data-panel="notifications" aria-selected="false">通知设置</button>
+    </nav>
+  </header>
+  <section id="clonePanel" role="tabpanel">
+    <div id="cloneState" class="state-card" data-state="idle" role="status" aria-live="polite">
+      <strong id="cloneStateTitle">尚未开启监控</strong>
+      <p id="cloneStatus">设置条件后点击开始，符合要求就自动创建并开机。</p>
+      <small id="cloneRunDetails"></small><small id="cloneCountdown"></small>
+    </div>
     <p style="font-size:12px">先在已关机源实例的“更多 → 克隆实例”勾选数据盘，点击继续。在克隆页打开插件。</p>
     <button id="cloneRead" type="button">读取当前克隆页</button>
     <p id="cloneSource" style="font-size:12px;overflow-wrap:anywhere">未读取源实例</p>
@@ -151,19 +180,33 @@
     <label for="cloneInterval">刷新间隔（秒，至少 10）</label>
     <input id="cloneInterval" type="number" value="15" min="10" max="3600" step="1">
     <p style="font-size:12px">仅按量计费；强制复制系统盘和数据盘；不自动增加付费数据盘容量。</p>
-    <label><input id="clonePreview" type="checkbox" checked style="width:auto">仅预览，选中主机后停止（不创建）</label>
-    <p style="font-size:12px">取消预览后，启动即授权在所填价格上限内创建并开机一个实例。提交不明时锁定，不会自动重试。</p>
+    <p style="font-size:12px">找到符合条件的主机后自动创建并开机，成功创建一个后停止。</p>
     <div class="button-group">
-      <button id="cloneStart" type="button" style="background:#365cf5;color:white">开始克隆监控</button>
-      <button id="cloneStop" type="button" disabled>停止克隆监控</button>
+      <button id="cloneStart" type="button" style="background:#365cf5;color:white">开始监控并自动创建</button>
+      <button id="cloneStop" type="button" disabled>停止监控</button>
     </div>
-    <p id="cloneStatus" role="status" style="font-size:12px;overflow-wrap:anywhere">未启动</p>
     <button id="cloneUnlock" type="button" hidden>已核实控制台，解除提交锁定</button>
-    <p style="font-size:12px">微信/邮箱通知在下方设置。保持标签页和浏览器运行，避免标签页休眠。</p>
+    <p style="font-size:12px">微信/邮箱可在“通知设置”菜单配置。保持标签页和浏览器运行，避免标签页休眠。</p>
   </section>
-  <h3>原实例开机监控</h3>
+<section id="legacyPanel" role="tabpanel" hidden>
+  <div class="status state-card" data-state="idle">
+    <div class="status-item">
+      <span class="status-label">状态：</span>
+      <span class="status-value" id="statusText">未启动</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">监控实例：</span>
+      <span class="status-value" id="monitoringInstance">-</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">检查间隔：</span>
+      <span class="status-value" id="intervalText">-</span>
+    </div>
+  </div>
 
-  
+
+
+
   <div class="form-group">
     <label>选择实例（可多选）</label>
     <select id="instanceSelect" multiple size="4" style="height: auto; min-height: 100px;">
@@ -171,9 +214,9 @@
     </select>
     <div style="font-size: 12px; color: #666; margin-top: 4px;">按住 Ctrl/Cmd 可多选</div>
   </div>
-  
+
   <button id="refreshBtn" class="refresh-btn">🔄 刷新实例列表</button>
-  
+
   <div id="instanceInfo" class="status" style="display: none; margin-bottom: 12px;">
     <div class="status-item">
       <span class="status-label">当前状态：</span>
@@ -184,7 +227,7 @@
       <span class="status-value" id="gpuStatus">-</span>
     </div>
   </div>
-  
+
   <div class="form-group">
     <label for="checkInterval">检查间隔（秒）</label>
     <select id="checkInterval">
@@ -196,14 +239,29 @@
       <option value="60">60 秒</option>
     </select>
   </div>
-  
+
+  <div class="button-group">
+    <button id="startBtn">开始监控</button>
+    <button id="stopBtn" disabled>停止监控</button>
+  </div>
+
+  <div class="info">
+    💡 <strong>使用说明：</strong><br>
+    1. 打开 AutoDL 实例列表页面<br>
+    2. 设置目标实例名称和检查间隔<br>
+    3. 点击"开始监控"<br>
+    4. 插件会自动检测 GPU 并执行开机操作
+  </div>
+
+</section>
+<section id="notificationsPanel" role="tabpanel" hidden><h3>开机成功通知</h3><p class="muted">两种监控共用这些通知设置。</p>
   <div class="form-group">
     <label>
       <input type="checkbox" id="enableEmail" style="width: auto; margin-right: 8px;">
       开机成功后发送微信通知（Server酱）
     </label>
   </div>
-  
+
   <div id="emailConfig" style="display: none;">
     <div class="form-group">
       <label for="serverChanSendKey">Server酱 SendKey</label>
@@ -256,37 +314,11 @@
   <div class="form-group" style="margin-top: 10px;">
     <button id="clearNotifySettingsBtn" type="button" style="width: 100%; background: #eee; color: #333; border: 1px solid #ddd;">清除通知配置</button>
   </div>
-  
-  <div class="button-group">
-    <button id="startBtn">开始监控</button>
-    <button id="stopBtn" disabled>停止监控</button>
-  </div>
-  
-  <div class="status">
-    <div class="status-item">
-      <span class="status-label">状态：</span>
-      <span class="status-value" id="statusText">未启动</span>
-    </div>
-    <div class="status-item">
-      <span class="status-label">监控实例：</span>
-      <span class="status-value" id="monitoringInstance">-</span>
-    </div>
-    <div class="status-item">
-      <span class="status-label">检查间隔：</span>
-      <span class="status-value" id="intervalText">-</span>
-    </div>
-  </div>
-  
-  <div class="info">
-    💡 <strong>使用说明：</strong><br>
-    1. 打开 AutoDL 实例列表页面<br>
-    2. 设置目标实例名称和检查间隔<br>
-    3. 点击"开始监控"<br>
-    4. 插件会自动检测 GPU 并执行开机操作
-  </div>
-  
+
+</section>
   <script src="clone-core.js"></script>
   <script src="popup.js"></script>
   <script src="clone-popup.js"></script>
+  <script src="popup-navigation.js"></script>
 </body>
 </html>

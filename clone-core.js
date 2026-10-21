@@ -24,11 +24,22 @@
     if (![1, 2, 3, 4, 5, 6, 7, 8, 10, 12].includes(count)) throw new Error('GPU 数量不正确');
     if (!Number.isFinite(maxPrice) || maxPrice <= 0) throw new Error('请输入整台实例每小时价格上限');
     if (!Number.isInteger(interval) || interval < 10 || interval > 3600) throw new Error('检查间隔为 10–3600 秒');
-    return { models, count, maxPrice, interval, preview: input.preview !== false };
+    return { models, count, maxPrice, interval };
   }
   function money(text) {
     const match = normalize(text).match(/[￥¥]\s*([\d,]+(?:\.\d+)?)/);
     return match ? Number(match[1].replace(/,/g, '')) : NaN;
+  }
+  function hourlyQuote(root) {
+    const labels = Array.from(root.querySelectorAll('.sum .pay-mode')).filter(e =>
+      normalize(e.textContent).replace(/[:：]/g, '') === '配置费用');
+    if (labels.length !== 1) throw new Error('无法唯一确认“配置费用”，请等待页面报价加载');
+    const row = labels[0].parentElement;
+    const unit = normalize(row.querySelector('.unit')?.textContent);
+    if (!/^\/\s*(?:时|小时)$/.test(unit)) throw new Error('配置费用不是小时价，已停止');
+    const amount = normalize(row.querySelector('.num')?.textContent).replace(/,/g, '');
+    if (!/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) throw new Error('页面配置费用尚未就绪');
+    return Number(amount);
   }
   function eligible(machine, config) {
     return !!machine.id && config.models.includes(normalize(machine.model)) &&
@@ -41,7 +52,7 @@
       throw new Error('源实例、地区或克隆页面参数发生变化，已停止');
     }
   }
-  const api = { normalize, context, options, money, eligible, assertContext };
+  const api = { normalize, context, options, money, hourlyQuote, eligible, assertContext };
   root.CloneCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

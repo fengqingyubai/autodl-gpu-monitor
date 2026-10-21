@@ -136,12 +136,9 @@
     const count = inputs(filter('GPU数量'), 'radio').find(e => e.checked)?.value;
     if (Number(count) !== job.config.count) throw new Error('GPU 数量发生变化');
     if (!document.querySelector('input[type="radio"][value="payg"]')?.checked) throw new Error('计费模式发生变化');
-    const sum = document.querySelector('.sum');
-    const sumText = text(sum);
-    const quoted = C.money(sumText);
-    if (!Number.isFinite(quoted) || !/(?:\/|每)\s*(?:时|小时)|小时/.test(sumText)) throw new Error('无法确认页面每小时配置总价');
+    const quoted = C.hourlyQuote(document);
     if (quoted > job.config.maxPrice || Math.abs(quoted - fresh.price * job.config.count) > 0.011) {
-      throw new Error('页面配置总价超过上限或与卡数不一致');
+      throw new Error(`报价核对失败：配置费用 ￥${quoted.toFixed(2)}/小时；单卡 ￥${fresh.price.toFixed(2)} × ${job.config.count}；上限 ￥${job.config.maxPrice.toFixed(2)}/小时`);
     }
     // Paid disk expansion is not included in an hourly GPU cap. Do not silently add daily charges.
     const diskInputs = Array.from(document.querySelectorAll('.el-input-number input'));
@@ -158,21 +155,20 @@
     if (!job || job.phase !== 'watching') return;
     busy = true;
     try {
+      if (job.config.preview === true) throw new Error('旧版预览任务已停止，请在新版界面重新开始监控');
       await current(job);
+      await rpc('cloneProgress', { id: job.id, message: '正在筛选同地区主机并刷新库存', stage: 'scanning', incrementRound: true });
       const table = await applyFilters(job);
       const found = await candidate(job, table);
       if (!found) {
-        await rpc('cloneProgress', { id: job.id, message: '本轮没有符合型号、卡数及总价上限的可用主机；等待刷新' });
+        await rpc('cloneProgress', { id: job.id, message: '监控已开启，暂未找到符合条件的库存，正在等待下一轮', stage: 'waiting', nextCheckAt: Date.now() + job.config.interval * 1000 });
         reloadTimer = setTimeout(async () => {
           try { await current(job); location.reload(); } catch (_) { /* stopped */ }
         }, job.config.interval * 1000);
         return;
       }
+      await rpc('cloneProgress', { id: job.id, message: `发现 ${found.name} ${found.model}，正在核对配置费用`, stage: 'checking' });
       const selected = await selectMachine(job, found);
-      if (job.config.preview) {
-        await rpc('clonePreview', { id: job.id, selected });
-        return;
-      }
       await current(job);
       const create = Array.from(document.querySelectorAll('button')).filter(visible)
         .filter(e => text(e) === '创建并开机');
@@ -183,7 +179,7 @@
       // Recheck the entire selection after awaiting the worker; no automatic confirmation of other dialogs.
       C.assertContext(pageContext(), job.context);
       const fresh = machines().find(m => m.id === selected.id && m.radio.checked);
-      if (!fresh || !C.eligible(fresh, job.config) || C.money(text(document.querySelector('.sum'))) !== selected.total) {
+      if (!fresh || !C.eligible(fresh, job.config) || C.hourlyQuote(document) !== selected.total) {
         throw new Error('提交前主机或价格改变；已停止，不会重试提交');
       }
       const allowed = await rpc('clonePermit', { id: job.id });

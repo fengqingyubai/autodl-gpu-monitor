@@ -34,7 +34,7 @@ test('config rejects missing GPU, CPU, invalid quantity, unbounded budget or rap
     { maxPrice: Infinity }, { interval: 5 }, { interval: NaN }]) {
     assert.throws(() => C.options({ ...config, ...changed }));
   }
-  assert.equal(C.options({ ...config, preview: undefined }).preview, true);
+  assert.equal('preview' in C.options({ ...config, preview: true }), false);
 });
 
 function worker(store, snapshots = []) {
@@ -177,7 +177,10 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
         <td><div class="cell"><div>RTX 4090<br>24GB</div></div></td><td>${available} / 8</td>
         <td>CPU</td><td>Xeon</td><td>50GB</td><td>13.0</td>
         <td><div class="price"><span>￥1.98</span>/时</div></td>
-      </tr></tbody></table></div></div><div class="sum">配置费用：￥${quoted}/时</div>
+      </tr></tbody></table></div></div><div class="sum">
+        <div class="daily-cost"><span class="pay-mode">日常费用：</span><span class="rmb">￥</span><span class="num">0.00</span><span class="unit">/日</span></div>
+        <div><span class="pay-mode">配置费用：</span><span class="rmb">￥</span><span class="num">${quoted}</span><span class="unit">/时</span></div>
+      </div>
       <button>创建并开机</button></body></html>`);
   window.__autodlCloneAdapter = false;
   for (const input of document.querySelectorAll('input')) {
@@ -210,11 +213,34 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
   await sandbox.runAdapter();
   return { clicks, actions, reloadScheduled };
 }
-test('page preview selects a candidate without calling reserve or clicking create', async () => {
+test('old preview jobs are stopped during migration instead of unexpectedly creating', async () => {
   const result = await pageWorkflow({ preview: true });
-  assert.ok(result.actions.includes('clonePreview'), JSON.stringify(result.actions));
+  assert.ok(result.actions.includes('cloneError'), JSON.stringify(result.actions));
   assert.equal(result.actions.includes('cloneReserve'), false);
   assert.equal(result.clicks, 0);
+});
+
+test('hourly quote ignores daily charges, balance and other currency amounts', () => {
+  const { document } = require('linkedom').parseHTML(`<div class="sum">
+    <div class="daily-cost"><span class="pay-mode">日常费用：</span><span class="num">0.00</span><span class="unit">/日</span></div>
+    <div><span class="pay-mode">配置费用：</span><span class="rmb">￥</span><span class="num">2.19</span><span class="unit">/时</span></div>
+    <div>余额 ￥199.63</div></div>`);
+  assert.equal(C.hourlyQuote(document), 2.19);
+  document.querySelector('.daily-cost .num').textContent = '8.00';
+  assert.equal(C.hourlyQuote(document), 2.19);
+  document.querySelector('.sum > div:nth-child(2) .unit').textContent = '/日';
+  assert.throws(() => C.hourlyQuote(document), /小时价/);
+});
+
+test('UI exposes separate mode menus, an immediate status card and no preview checkbox', () => {
+  const { document } = require('linkedom').parseHTML(fs.readFileSync(path.join(root, 'popup.html'), 'utf8'));
+  assert.equal(document.querySelectorAll('[data-panel]').length, 3);
+  assert.ok(document.querySelector('#clonePanel #cloneStateTitle'));
+  assert.ok(document.querySelector('#legacyPanel #statusText'));
+  assert.ok(document.querySelector('#notificationsPanel #enableEmailNotify'));
+  assert.equal(document.querySelector('#clonePreview'), null);
+  const ids = Array.from(document.querySelectorAll('[id]')).map(e => e.id);
+  assert.equal(new Set(ids).size, ids.length);
 });
 test('page workflow reserves then clicks once, and cancels before click if stopped', async () => {
   const submitted = await pageWorkflow();

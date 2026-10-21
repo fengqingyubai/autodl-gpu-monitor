@@ -236,6 +236,7 @@ emailjsTemplateId.addEventListener('blur', () => {
 
 // 加载当前状态
 loadStatus();
+setInterval(loadStatus, 1500);
 
 // 加载实例列表
 loadInstances();
@@ -373,7 +374,7 @@ startBtn.addEventListener('click', () => {
       }, (response) => {
         if (response && response.success) {
           updateUI(true, instanceNames.join(', '), interval);
-        }
+        } else { alert(response?.error || '启动失败，请刷新 AutoDL 页面后重试'); }
       });
     })
     .catch((e) => {
@@ -385,7 +386,7 @@ startBtn.addEventListener('click', () => {
       }, (response) => {
         if (response && response.success) {
           updateUI(true, instanceNames.join(', '), interval);
-        }
+        } else { alert(response?.error || '启动失败，请刷新 AutoDL 页面后重试'); }
       });
     });
 });
@@ -415,7 +416,8 @@ function loadStatus() {
 // 更新 UI
 function updateUI(enabled, instanceName = '-', interval = 5) {
   if (enabled) {
-    statusText.textContent = '监控中';
+    statusText.closest('.state-card').dataset.state = 'watching';
+    statusText.textContent = '监控已开启';
     statusText.className = 'status-value status-running';
     monitoringInstance.textContent = instanceName;
     intervalText.textContent = `${interval} 秒`;
@@ -438,6 +440,7 @@ function updateUI(enabled, instanceName = '-', interval = 5) {
     showEmailjsTemplateId.disabled = true;
     clearNotifySettingsBtn.disabled = true;
   } else {
+    statusText.closest('.state-card').dataset.state = 'idle';
     statusText.textContent = '未启动';
     statusText.className = 'status-value status-stopped';
     monitoringInstance.textContent = '-';
