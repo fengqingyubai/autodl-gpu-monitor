@@ -155,7 +155,7 @@
 </head>
 <body>
   <header class="app-header">
-    <h2>AutoDL GPU 监控 <small>1.1.3</small></h2>
+    <h2>AutoDL GPU 监控 <small>1.1.4</small></h2>
     <nav role="tablist" aria-label="监控模式">
       <button role="tab" data-panel="clone" aria-selected="true">自动克隆</button>
       <button role="tab" data-panel="legacy" aria-selected="false">原实例开机</button>
@@ -316,9 +316,20 @@
   </div>
 
 </section>
+  <details style="margin-top:16px;border-top:1px solid #ddd;padding-top:10px">
+    <summary>诊断日志</summary>
+    <p class="muted">仅保存在本机，最多 512 KiB，满后自动淘汰最旧记录。</p>
+    <p id="diagnosticStatus" class="muted">正在读取…</p>
+    <div class="button-group">
+      <button id="diagnosticExport" type="button">导出日志</button>
+      <button id="diagnosticClear" type="button">清空日志</button>
+    </div>
+  </details>
   <script src="clone-core.js"></script>
   <script src="popup.js"></script>
   <script src="clone-popup.js"></script>
   <script src="popup-navigation.js"></script>
+  <script src="diagnostics.js"></script>
+  <script src="diagnostics-popup.js"></script>
 </body>
 </html>

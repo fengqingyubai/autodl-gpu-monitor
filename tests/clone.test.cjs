@@ -41,6 +41,8 @@ function worker(store, snapshots = []) {
   let onMessage, alarm;
   const notices = [];
   const sandbox = { console, URL, crypto: require('node:crypto').webcrypto, CloneCore: C,
+    createDiagnosticLogger: require('../diagnostics.js').createDiagnosticLogger,
+    cleanDiagnosticDetails: require('../diagnostics.js').clean,
     monitoringEnabled: false, intervalId: null, checkInProgress: false, clearInterval() {},
     setTimeout: fn => { queueMicrotask(fn); return 1; }, importScripts() {},
     sendEmailNotification: async data => notices.push({ email: data }),
@@ -67,6 +69,20 @@ function watching(preview = false) {
     context: { ...C.context(url), regionName: '重庆A区', dataCenter: 'chongqingDC1' }, baseline: ['source-abc', 'busy-710'] };
 }
 const selected = { id: 'host123', model: 'RTX 4090', name: '123机', price: 1.98, total: 3.96 };
+test('worker diagnostics export captures page version, price comparison and prior job context', async () => {
+  const store = { cloneMonitorJob: watching() };
+  const w = worker(store);
+  await w.send('cloneDiagnostic', { id: 'job-1', adapterVersion: C.VERSION, event: 'price.check',
+    details: { hourlyQuote: 2.19, dailyQuote: 0, count: 1, expectedTotal: 2.19, maxPrice: 3, token: 'do-not-log' } });
+  const exported = await w.send('diagnosticRead');
+  assert.equal(exported.currentJob.jobId, 'job-1');
+  assert.equal(exported.extensionVersion, C.VERSION);
+  const price = exported.log.entries.find(entry => entry.event === 'price.check');
+  assert.equal(price.details.pageVersion, C.VERSION);
+  assert.equal(price.details.hourlyQuote, 2.19);
+  assert.equal(price.details.dailyQuote, 0);
+  assert.equal(JSON.stringify(exported).includes('do-not-log'), false);
+});
 test('only one reservation survives concurrent requests and worker restart', async () => {
   const store = { cloneMonitorJob: watching() };
   const w = worker(store);

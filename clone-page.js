@@ -148,7 +148,15 @@
     const count = inputs(filter('GPU数量'), 'radio').find(e => e.checked)?.value;
     if (Number(count) !== job.config.count) throw new Error('GPU 数量发生变化');
     if (!document.querySelector('input[type="radio"][value="payg"]')?.checked) throw new Error('计费模式发生变化');
-    const quoted = C.hourlyQuote(document);
+    let quoted;
+    try { quoted = C.hourlyQuote(document); }
+    finally {
+      await rpc('cloneDiagnostic', { id: job.id, event: 'price.check', details: {
+        hourlyQuote: quoted ?? null, dailyQuote: Number(document.querySelector('.sum .daily-cost .num')?.textContent),
+        quoteSource: '配置费用', cardPrice: fresh.price, expectedTotal: fresh.price * job.config.count,
+        maxPrice: job.config.maxPrice, count: job.config.count, candidateId: fresh.id, selectedModel: fresh.model
+      } }).catch(() => {});
+    }
     if (quoted > job.config.maxPrice || Math.abs(quoted - fresh.price * job.config.count) > 0.011) {
       throw new Error(`报价核对失败：配置费用 ￥${quoted.toFixed(2)}/小时；单卡 ￥${fresh.price.toFixed(2)} × ${job.config.count}；上限 ￥${job.config.maxPrice.toFixed(2)}/小时`);
     }
@@ -173,6 +181,11 @@
       await rpc('cloneProgress', { id: job.id, message: '正在刷新库存…', stage: 'scanning' });
       const table = await applyFilters(job);
       const found = await candidate(job, table);
+      await rpc('cloneDiagnostic', { id: job.id, event: 'scan.result', details: {
+        models: job.config.models, selectedModels: inputs(filter('GPU型号'), 'checkbox').filter(e => e.checked).map(e => e.value),
+        rows: machines().length, candidateId: found?.id, candidateName: found?.name,
+        selectedModel: found?.model, available: found?.available, cardPrice: found?.price
+      } }).catch(() => {});
       await rpc('cloneRoundComplete', { id: job.id, roundId: crypto.randomUUID() });
       retryDelay = 0;
       if (!found) {
@@ -204,6 +217,9 @@
       // The next page may show a required confirmation; leave it for the user. Never repeat the click.
     } catch (error) {
       if (!job) return;
+      await rpc('cloneDiagnostic', { id: job.id, event: 'page.error', details: {
+        message: error.message, stockChanged: !!error.stockChanged, clicked
+      } }).catch(() => {});
       if (error.stockChanged && !clicked) {
         const released = !attemptId || (await rpc('cloneAbortBeforeClick', { id: job.id, attemptId })).success;
         if (released) { await schedule(job, error.message); return; }

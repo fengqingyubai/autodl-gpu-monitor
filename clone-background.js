@@ -1,11 +1,18 @@
 /* Persistent one-shot submission and status tracking; imported by background.js. */
-importScripts('clone-core.js');
+importScripts('clone-core.js', 'diagnostics.js');
+const diagnosticLog = createDiagnosticLogger(chrome.storage.local, CloneCore.VERSION);
+diagnosticLog.append('extension.boot');
 const CLONE_JOB_KEY = 'cloneMonitorJob';
 let cloneQueue = Promise.resolve();
 const cloneWait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const readCloneJob = async () => (await chrome.storage.local.get(CLONE_JOB_KEY))[CLONE_JOB_KEY];
 async function saveCloneJob(job) {
   await chrome.storage.local.set({ [CLONE_JOB_KEY]: { ...job, updatedAt: Date.now() } });
+  await diagnosticLog.append('job.state', { jobId: job.id, sourceId: job.context?.sourceId,
+    region: job.context?.region, pageVersion: job.context?.adapterVersion,
+    phase: job.phase, stage: job.stage, round: job.round, message: job.message,
+    createdAt: job.createdAt, lastSubmissionNotice: job.lastSubmissionNotice },
+    ['error', 'uncertain'].includes(job.phase) ? 'error' : 'info');
   const badge = { watching: ['ON', '#13854b'], submitting: ['…', '#2563eb'], submitted: ['…', '#2563eb'],
     error: ['ERR', '#dc2626'], uncertain: ['!', '#b45309'], success: ['OK', '#13854b'] }[job.phase];
   await chrome.action?.setBadgeText({ text: badge?.[0] || '' });
@@ -41,13 +48,26 @@ function stopLegacyMonitor() {
 function cloneActive(job) { return job && ['watching', 'submitting', 'submitted'].includes(job.phase); }
 async function handleCloneMessage(request, sender) {
   let job = await readCloneJob();
+  if (request.action === 'diagnosticRead') return { success: true, log: await diagnosticLog.read(),
+    exportedAt: new Date().toISOString(), extensionVersion: CloneCore.VERSION,
+    currentJob: cleanDiagnosticDetails({ jobId: job?.id, phase: job?.phase, round: job?.round,
+      pageVersion: job?.context?.adapterVersion, sourceId: job?.context?.sourceId,
+      message: job?.message, createdAt: job?.createdAt, updatedAt: job?.updatedAt,
+      lastSubmissionNotice: job?.lastSubmissionNotice }) };
+  if (request.action === 'diagnosticClear') { await diagnosticLog.clear(); return { success: true }; }
+  if (request.action === 'diagnosticPopup') {
+    await diagnosticLog.append('popup.open', { popupVersion: request.popupVersion });
+    return { success: true };
+  }
   if (request.action === 'cloneStatus') return { success: true, job };
   if (request.action === 'cloneStart') {
+    await diagnosticLog.append('monitor.start.request', { ...request.config, popupVersion: request.popupVersion });
     if (cloneActive(job)) throw new Error('已有克隆任务，请先停止；已提交的任务需核实后解除锁定');
     if (job?.phase === 'uncertain') throw new Error('上次提交结果未确认，请先核实实例列表并解除提交锁定');
     if (checkInProgress) throw new Error('原开关机操作仍在执行，请稍后再开始克隆');
     const cfg = CloneCore.options(request.config);
     const { context } = await sendClonePage(request.tabId, { action: 'cloneContext' });
+    await diagnosticLog.append('page.version', { pageVersion: context.adapterVersion, sourceId: context.sourceId, region: context.region });
     if (context.adapterVersion !== CloneCore.VERSION) throw new Error('AutoDL 页面仍在运行旧版脚本，请刷新克隆页面后重试');
     if (cfg.models.some(model => !context.models.includes(model))) throw new Error('所选 GPU 型号不属于源实例地区');
     stopLegacyMonitor();
@@ -93,6 +113,12 @@ async function handleCloneMessage(request, sender) {
       return { success: false };
     }
     return { success: true, job };
+  }
+  if (request.action === 'cloneDiagnostic') {
+    if (!['scan.result', 'price.check', 'page.error', 'candidate.selected'].includes(request.event)) return { success: false };
+    await diagnosticLog.append(request.event, { ...request.details, jobId: job.id, pageVersion: request.adapterVersion },
+      request.event === 'page.error' ? 'error' : 'info');
+    return { success: true };
   }
   if (request.action === 'clonePermit') return { success: job.phase === 'submitting' && !!request.attemptId && request.attemptId === job.attemptId };
   if (request.action === 'cloneClicked') {
@@ -149,11 +175,16 @@ async function handleCloneMessage(request, sender) {
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
   const actions = ['cloneStatus', 'cloneStart', 'cloneStop', 'cloneUnlock', 'cloneJob', 'clonePermit',
     'cloneProgress', 'cloneRoundComplete', 'cloneReserve', 'cloneClicked', 'cloneError',
-    'cloneAbortBeforeClick', 'cloneSubmissionNotice'];
+    'cloneAbortBeforeClick', 'cloneSubmissionNotice', 'cloneDiagnostic',
+    'diagnosticRead', 'diagnosticClear', 'diagnosticPopup'];
   if (!actions.includes(request.action)) return false;
   // Serialize reserve, stop and progress mutations, including across different tabs.
   cloneQueue = cloneQueue.then(() => handleCloneMessage(request, sender))
-    .then(respond, error => respond({ success: false, error: error.message }));
+    .then(respond, async error => {
+      await diagnosticLog.append('worker.error', { reason: request.action, pageVersion: request.adapterVersion,
+        popupVersion: request.popupVersion, message: error.message }, 'error');
+      respond({ success: false, error: error.message });
+    });
   return true;
 });
 let cloneTracking = false;

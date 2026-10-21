@@ -83,7 +83,7 @@
       setBusy(true);
       await persistNotifySettingsFromUI();
       await chrome.storage.local.set({ cloneSettings: cfg });
-      const response = await message('cloneStart', { tabId: cloneTabId, config: cfg });
+      const response = await message('cloneStart', { tabId: cloneTabId, config: cfg, popupVersion: CloneCore.VERSION });
       if (!response?.success) throw new Error(response?.error || '启动失败');
       starting = false;
       await status();
