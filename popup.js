@@ -347,6 +347,7 @@ async function showInstanceDetails(instanceName) {
 
 // 开始监控
 startBtn.addEventListener('click', () => {
+  window.scrollTo({ top: 0, behavior: 'instant' });
   // 获取所有选中的实例
   const selectedOptions = Array.from(instanceSelect.selectedOptions);
   const instanceNames = selectedOptions.map(opt => opt.value).filter(v => v);
@@ -416,6 +417,7 @@ function loadStatus() {
 // 更新 UI
 function updateUI(enabled, instanceName = '-', interval = 5) {
   if (enabled) {
+    statusText.closest('.state-card').hidden = false;
     statusText.closest('.state-card').dataset.state = 'watching';
     statusText.textContent = '监控已开启';
     statusText.className = 'status-value status-running';
@@ -440,6 +442,7 @@ function updateUI(enabled, instanceName = '-', interval = 5) {
     showEmailjsTemplateId.disabled = true;
     clearNotifySettingsBtn.disabled = true;
   } else {
+    statusText.closest('.state-card').hidden = true;
     statusText.closest('.state-card').dataset.state = 'idle';
     statusText.textContent = '未启动';
     statusText.className = 'status-value status-stopped';

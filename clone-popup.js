@@ -2,12 +2,17 @@
   const $ = id => document.getElementById(id);
   const message = (action, data = {}) => chrome.runtime.sendMessage({ action, ...data });
   let cloneTabId, lastJob, starting = false;
+  const edited = new Set();
+  for (const id of ['cloneModels', 'cloneCount', 'cloneMaxPrice', 'cloneInterval']) {
+    for (const event of ['input', 'change']) $(id).addEventListener(event, () => edited.add(id));
+  }
   function show(value, phase = 'idle') {
+    $('cloneState').hidden = false;
     $('cloneStatus').textContent = value;
     $('cloneState').dataset.state = phase;
     $('cloneStateTitle').textContent = ({ watching: '监控进行中', submitting: '正在创建实例',
       submitted: '正在等待开机', success: '克隆开机成功', error: '监控已停止 · 出错',
-      uncertain: '需要核实创建结果', stopped: '监控已停止', starting: '正在启动监控…' }[phase] || '尚未开启监控');
+      uncertain: '需要核实', stopped: '已停止', starting: '正在启动…' }[phase] || '提示');
   }
   function setBusy(active) {
     for (const id of ['cloneRead', 'cloneModels', 'cloneCount', 'cloneMaxPrice', 'cloneInterval']) $(id).disabled = active;
@@ -22,19 +27,23 @@
     }
     const response = await chrome.tabs.sendMessage(tab.id, { action: 'cloneContext' });
     if (!response?.success) throw new Error(response?.error || '请刷新克隆页面以加载新版插件');
+    if (response.context.adapterVersion !== CloneCore.VERSION) throw new Error('请刷新 AutoDL 克隆页面，以加载新版网页脚本');
     cloneTabId = tab.id;
     $('cloneSource').textContent = `${response.context.regionName} · ${response.context.sourceId}`;
     const saved = (await chrome.storage.local.get('cloneSettings')).cloneSettings || {};
+    const chosenModels = edited.has('cloneModels') ? Array.from($('cloneModels').selectedOptions).map(e => e.value) : saved.models || [];
     $('cloneModels').replaceChildren(...response.context.models.map(model => {
       const option = document.createElement('option');
-      option.value = model; option.textContent = model; option.selected = (saved.models || []).includes(model);
+      option.value = model; option.textContent = model; option.selected = chosenModels.includes(model);
       return option;
     }));
-    if (saved.count) $('cloneCount').value = saved.count;
-    if (saved.maxPrice) $('cloneMaxPrice').value = saved.maxPrice;
-    if (saved.interval) $('cloneInterval').value = saved.interval;
+    if (saved.count && !edited.has('cloneCount')) $('cloneCount').value = saved.count;
+    if (saved.maxPrice && !edited.has('cloneMaxPrice')) $('cloneMaxPrice').value = saved.maxPrice;
+    if (saved.interval && !edited.has('cloneInterval')) $('cloneInterval').value = saved.interval;
   }
   function render(job) {
+    if (lastJob?.id === job?.id && ((job?.updatedAt || 0) < (lastJob?.updatedAt || 0) ||
+        (job?.updatedAt === lastJob?.updatedAt && (job?.round || 0) < (lastJob?.round || 0)))) return;
     lastJob = job;
     if (starting && (!job || !['watching', 'submitting', 'submitted'].includes(job.phase))) return;
     const active = job && ['watching', 'submitting', 'submitted'].includes(job.phase);
@@ -43,7 +52,9 @@
     if (job) {
       show(job.message, job.phase);
       if (active) $('cloneSource').textContent = `${job.context.regionName} · ${job.context.sourceId}`;
-      $('cloneRunDetails').textContent = `已检查 ${job.round || 0} 轮 · ${job.config.count} 张卡 · 上限 ￥${job.config.maxPrice}/小时`;
+      $('cloneRunDetails').textContent = job.round > 0 ? `已检查 ${job.round} 轮` : '首次检查中';
+    } else if (!starting) {
+      $('cloneState').hidden = true;
     }
     countdown();
   }
@@ -56,23 +67,27 @@
     if (response?.success) render(response.job);
   }
   $('cloneRead').addEventListener('click', () => loadContext()
-    .then(() => { if (!lastJob || !['watching', 'submitting', 'submitted'].includes(lastJob.phase)) show('已读取源实例，设置条件后点击开始监控'); })
+    .then(() => { if (!lastJob) $('cloneState').hidden = true; })
     .catch(error => show(error.message, 'error')));
   $('cloneStart').addEventListener('click', async () => {
-    starting = true;
-    show('正在核实源实例与地区，请稍候…', 'starting');
-    setBusy(true);
     try {
-      if (!cloneTabId) await loadContext();
+      for (const id of ['cloneMaxPrice', 'cloneInterval']) {
+        if (!$(id).reportValidity()) return;
+      }
+      if (!cloneTabId) throw new Error('请先读取当前克隆页，再设置监控条件');
       const cfg = CloneCore.options({ models: Array.from($('cloneModels').selectedOptions).map(e => e.value),
         count: $('cloneCount').value, maxPrice: $('cloneMaxPrice').value, interval: $('cloneInterval').value });
+      starting = true;
+      show('正在核实源实例与地区…', 'starting');
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      setBusy(true);
       await persistNotifySettingsFromUI();
       await chrome.storage.local.set({ cloneSettings: cfg });
       const response = await message('cloneStart', { tabId: cloneTabId, config: cfg });
       if (!response?.success) throw new Error(response?.error || '启动失败');
       starting = false;
       await status();
-    } catch (error) { starting = false; setBusy(false); show(error.message, 'error'); }
+    } catch (error) { starting = false; setBusy(false); show(error.message, 'error'); window.scrollTo({ top: 0, behavior: 'instant' }); }
   });
   $('cloneStop').addEventListener('click', async () => { await message('cloneStop'); await status(); });
   $('cloneUnlock').addEventListener('click', async () => {

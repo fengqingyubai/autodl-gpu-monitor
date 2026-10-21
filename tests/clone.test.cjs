@@ -31,7 +31,7 @@ test('full-instance budget, exact GPU model, stock and disabled host filtering',
 
 test('config rejects missing GPU, CPU, invalid quantity, unbounded budget or rapid refresh', () => {
   for (const changed of [{ models: [] }, { models: ['CPU'] }, { count: 9 }, { count: 1.5 }, { maxPrice: '' },
-    { maxPrice: Infinity }, { interval: 5 }, { interval: NaN }]) {
+    { maxPrice: Infinity }, { maxPrice: 1.001 }, { interval: 2 }, { interval: 3.5 }, { interval: '' }, { interval: NaN }]) {
     assert.throws(() => C.options({ ...config, ...changed }));
   }
   assert.equal('preview' in C.options({ ...config, preview: true }), false);
@@ -143,6 +143,7 @@ test('DOM adapter reads live-style clone controls, ignores old price and fails o
   for (const input of document.querySelectorAll('input')) {
     Object.defineProperty(input, 'checked', { get: () => input.hasAttribute('checked') });
     Object.defineProperty(input, 'disabled', { get: () => input.hasAttribute('disabled') });
+    if (input.type === 'checkbox') input.closest('label')?.addEventListener('click', () => input.toggleAttribute('checked'));
   }
   const sandbox = { CloneCore: C, window, document, location: { href: url }, console, setInterval: () => 1,
     chrome: { runtime: { onMessage: { addListener() {} } } } };
@@ -160,7 +161,7 @@ test('DOM adapter reads live-style clone controls, ignores old price and fails o
   assert.throws(() => sandbox.adapter.pageContext(), /地区未锁定/);
 });
 
-async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, cancelOnReserve = false } = {}) {
+async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, cancelOnReserve = false, lostOnSelect = false } = {}) {
   const { parseHTML } = require('linkedom');
   const { document, window } = parseHTML(`<html><body>
     克隆实例仅能在同一地区内进行，以实例：source-abc的系统创建新实例
@@ -183,12 +184,15 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
       </div>
       <button>创建并开机</button></body></html>`);
   window.__autodlCloneAdapter = false;
+  document.querySelector('.sort-caret.descending').addEventListener('click', () =>
+    document.querySelector('th').classList.toggle('descending'));
   for (const input of document.querySelectorAll('input')) {
     Object.defineProperty(input, 'checked', { get: () => input.hasAttribute('checked') });
     Object.defineProperty(input, 'disabled', { get: () => input.hasAttribute('disabled') });
   }
   document.querySelector('.el-table__body tr').addEventListener('click', () =>
-    document.querySelector('input[value="host123"]').setAttribute('checked', ''));
+    { document.querySelector('input[value="host123"]').setAttribute('checked', '');
+      if (lostOnSelect) document.querySelector('.el-table__body tr').children[3].textContent = '0 / 8'; });
   const create = document.querySelector('button');
   create.getClientRects = () => [1];
   let clicks = 0;
@@ -197,7 +201,8 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
   let reloadScheduled = false;
   const job = watching(preview);
   const sandbox = { CloneCore: C, window, document, location: { href: url, pathname: '/cloneInstance', reload() {} },
-    console, URL, Event: window.Event, clearTimeout() {}, setInterval: () => 1,
+    console, URL, crypto: require('node:crypto').webcrypto, Event: window.Event,
+    MutationObserver: class { observe() {} disconnect() {} }, clearTimeout() {}, setInterval: () => 1,
     setTimeout: (fn, ms) => { if (ms >= 10000) reloadScheduled = true; else queueMicrotask(fn); return 1; },
     chrome: { runtime: { onMessage: { addListener() {} }, sendMessage: async request => {
       actions.push(request.action);
@@ -248,6 +253,62 @@ test('page workflow reserves then clicks once, and cancels before click if stopp
   assert.ok(submitted.actions.includes('cloneClicked'));
   const cancelled = await pageWorkflow({ cancelOnReserve: true });
   assert.equal(cancelled.clicks, 0);
+});
+
+test('new minimum interval accepts 3 and 9 seconds and rejects malformed input', () => {
+  assert.equal(C.options({ ...config, interval: 3 }).interval, 3);
+  assert.equal(C.options({ ...config, interval: 9 }).interval, 9);
+  for (const value of [0, 2, -1, 3.1, 'bad', '', Infinity]) assert.throws(() => C.options({ ...config, interval: value }));
+});
+
+test('completed rounds count once and continue increasing across worker restarts', async () => {
+  const store = { cloneMonitorJob: watching() };
+  const w = worker(store);
+  await w.send('cloneRoundComplete', { id: 'job-1', roundId: 'round-a' });
+  await w.send('cloneRoundComplete', { id: 'job-1', roundId: 'round-a' });
+  assert.equal(store.cloneMonitorJob.round, 1);
+  await worker(store).send('cloneRoundComplete', { id: 'job-1', roundId: 'round-b' });
+  assert.equal(store.cloneMonitorJob.round, 2);
+});
+
+test('old webpage scripts cannot silently run against the new worker', async () => {
+  const store = { cloneMonitorJob: watching() };
+  const response = await worker(store).send('cloneJob');
+  assert.equal(response.success, false);
+  assert.equal(store.cloneMonitorJob.phase, 'error');
+  assert.match(store.cloneMonitorJob.message, /刷新/);
+});
+
+test('losing inventory before any submission continues polling without a create click', async () => {
+  const result = await pageWorkflow({ lostOnSelect: true });
+  assert.equal(result.clicks, 0);
+  assert.equal(result.actions.includes('cloneReserve'), false);
+  assert.equal(result.actions.includes('cloneError'), false);
+  assert.ok(result.reloadScheduled);
+});
+
+test('pre-click reservation release is attempt-scoped and cannot release clicked requests', async () => {
+  const store = { cloneMonitorJob: watching() };
+  const w = worker(store);
+  const permit = await w.send('cloneReserve', { id: 'job-1', selected });
+  assert.equal((await w.send('cloneAbortBeforeClick', { id: 'job-1', attemptId: 'wrong' })).success, false);
+  assert.equal((await w.send('cloneAbortBeforeClick', { id: 'job-1', attemptId: permit.attemptId })).success, true);
+  assert.equal(store.cloneMonitorJob.phase, 'watching');
+  const next = await w.send('cloneReserve', { id: 'job-1', selected });
+  await w.send('cloneClicked', { id: 'job-1', attemptId: next.attemptId });
+  assert.equal((await w.send('cloneAbortBeforeClick', { id: 'job-1', attemptId: next.attemptId })).success, false);
+  assert.equal(store.cloneMonitorJob.phase, 'submitted');
+});
+
+test('new submission errors are retained without unlocking an ambiguous billable request', async () => {
+  const store = { cloneMonitorJob: watching() };
+  const w = worker(store);
+  const permit = await w.send('cloneReserve', { id: 'job-1', selected });
+  await w.send('cloneClicked', { id: 'job-1', attemptId: permit.attemptId });
+  await w.send('cloneSubmissionNotice', { id: 'job-1', attemptId: permit.attemptId, notice: '测试：GPU资源发生变化' });
+  assert.equal(store.cloneMonitorJob.lastSubmissionNotice, '测试：GPU资源发生变化');
+  assert.equal(store.cloneMonitorJob.phase, 'submitted');
+  assert.equal((await w.send('cloneReserve', { id: 'job-1', selected })).success, false);
 });
 test('no stock schedules refresh; changed checkout total fails closed', async () => {
   const empty = await pageWorkflow({ available: 0 });

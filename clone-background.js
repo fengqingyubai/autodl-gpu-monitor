@@ -48,6 +48,7 @@ async function handleCloneMessage(request, sender) {
     if (checkInProgress) throw new Error('原开关机操作仍在执行，请稍后再开始克隆');
     const cfg = CloneCore.options(request.config);
     const { context } = await sendClonePage(request.tabId, { action: 'cloneContext' });
+    if (context.adapterVersion !== CloneCore.VERSION) throw new Error('AutoDL 页面仍在运行旧版脚本，请刷新克隆页面后重试');
     if (cfg.models.some(model => !context.models.includes(model))) throw new Error('所选 GPU 型号不属于源实例地区');
     stopLegacyMonitor();
     legacyCloneLocked = true;
@@ -86,11 +87,34 @@ async function handleCloneMessage(request, sender) {
   if (!job || job.id !== request.id && request.action !== 'cloneJob' || sender.tab?.id !== job.tabId) {
     return { success: false, error: '不是当前克隆任务' };
   }
-  if (request.action === 'cloneJob') return { success: true, job };
-  if (request.action === 'clonePermit') return { success: job.phase === 'submitting' };
+  if (request.action === 'cloneJob') {
+    if (job.phase === 'watching' && request.adapterVersion !== CloneCore.VERSION) {
+      await saveCloneJob({ ...job, phase: 'error', message: '网页脚本版本已更新，请刷新克隆页面后重新开始' });
+      return { success: false };
+    }
+    return { success: true, job };
+  }
+  if (request.action === 'clonePermit') return { success: job.phase === 'submitting' && !!request.attemptId && request.attemptId === job.attemptId };
   if (request.action === 'cloneClicked') {
-    if (job.phase === 'submitting') await saveCloneJob({ ...job, phase: 'submitted',
-      submittedAt: Date.now(), message: '已点击创建并开机；正在核实新实例，绝不重复提交' });
+    if (job.phase === 'submitting' && request.attemptId === job.attemptId) await saveCloneJob({ ...job, phase: 'submitted',
+      clickedAt: Date.now(), submittedAt: Date.now(), message: job.lastSubmissionNotice ?
+        `页面提示：${job.lastSubmissionNotice}；正在核实是否创建成功` : '已提交，正在核实新实例' });
+    return { success: true };
+  }
+  if (request.action === 'cloneAbortBeforeClick') {
+    if (job.phase !== 'submitting' || !request.attemptId || request.attemptId !== job.attemptId || job.clickedAt) {
+      return { success: false, error: '已提交或尝试标识不匹配，不能重试' };
+    }
+    await saveCloneJob({ ...job, phase: 'watching', selected: null, attemptId: null,
+      submittedAt: null, message: '提交前库存变化，继续监控' });
+    return { success: true };
+  }
+  if (request.action === 'cloneSubmissionNotice') {
+    if (!request.attemptId || request.attemptId !== job.attemptId || !['submitting', 'submitted'].includes(job.phase)) return { success: false };
+    const notice = String(request.notice || '').slice(0, 1000);
+    await saveCloneJob({ ...job, lastSubmissionNotice: notice, message: `页面提示：${notice}；正在核实创建结果` });
+    // Do not guess which page messages guarantee a rejected request. Add verified rejection codes/text
+    // here once captured from AutoDL. Merely seeing no new instance is not proof of rejection.
     return { success: true };
   }
   if (request.action === 'cloneError') {
@@ -102,23 +126,30 @@ async function handleCloneMessage(request, sender) {
     return { success: true };
   }
   if (job.phase !== 'watching') return { success: false, error: '任务已停止或已提交' };
-  if (request.action === 'cloneProgress') {
+  if (request.action === 'cloneRoundComplete') {
+    if (!request.roundId) return { success: false };
+    if (job.lastRoundId !== request.roundId) await saveCloneJob({ ...job,
+      round: (Number.isInteger(job.round) ? job.round : 0) + 1, lastRoundId: request.roundId });
+  } else if (request.action === 'cloneProgress') {
     await saveCloneJob({ ...job, message: request.message, stage: request.stage,
-      nextCheckAt: request.nextCheckAt || null, round: (job.round || 0) + (request.incrementRound ? 1 : 0) });
+      nextCheckAt: request.nextCheckAt || null });
   } else if (request.action === 'cloneReserve') {
     if (job.config.preview === true) throw new Error('旧版预览任务需要重新启动');
     if (!request.selected?.id || !job.config.models.includes(request.selected.model) ||
         !Number.isFinite(request.selected.total) || !Number.isFinite(request.selected.price) ||
         request.selected.total > job.config.maxPrice || request.selected.total <= 0 ||
         Math.abs(request.selected.total - request.selected.price * job.config.count) > 0.011) throw new Error('提交参数不符合限制');
-    await saveCloneJob({ ...job, phase: 'submitting', selected: request.selected,
-      submittedAt: Date.now(), message: '提交锁定中，刷新或重启也不会重复创建' });
+    const attemptId = crypto.randomUUID();
+    await saveCloneJob({ ...job, phase: 'submitting', selected: request.selected, attemptId, clickedAt: null,
+      submittedAt: Date.now(), message: '正在提交创建请求' });
+    return { success: true, attemptId };
   }
   return { success: true };
 }
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
   const actions = ['cloneStatus', 'cloneStart', 'cloneStop', 'cloneUnlock', 'cloneJob', 'clonePermit',
-    'cloneProgress', 'cloneReserve', 'cloneClicked', 'cloneError'];
+    'cloneProgress', 'cloneRoundComplete', 'cloneReserve', 'cloneClicked', 'cloneError',
+    'cloneAbortBeforeClick', 'cloneSubmissionNotice'];
   if (!actions.includes(request.action)) return false;
   // Serialize reserve, stop and progress mutations, including across different tabs.
   cloneQueue = cloneQueue.then(() => handleCloneMessage(request, sender))
