@@ -473,6 +473,13 @@ async function handleInstanceStatus(data, tabId) {
 // 发送邮件通知
 async function sendEmailNotification(instanceData) {
   try {
+    await sendWechatTestNotification({ title: 'AutoDL 开机成功',
+      content: `${instanceData.instanceName || ''}\n${instanceData.spec || ''}` });
+  } catch (error) {
+    chrome.notifications.create({ type: 'basic', iconUrl: 'icon128.png',
+      title: '微信测试号通知失败', message: error.message });
+  }
+  try {
     const settings = await chrome.storage.local.get([
       'notifyWeChatEnabled',
       'serverChanSendKey',
@@ -594,3 +601,4 @@ async function sendEmailViaAPI(emailData) {
 }
 
 importScripts('clone-background.js');
+importScripts('wechat-test-background.js');

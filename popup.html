@@ -155,7 +155,7 @@
 </head>
 <body>
   <header class="app-header">
-    <h2>AutoDL GPU 监控 <small>1.1.4</small></h2>
+    <h2>AutoDL GPU 监控 <small>1.1.5</small></h2>
     <nav role="tablist" aria-label="监控模式">
       <button role="tab" data-panel="clone" aria-selected="true">自动克隆</button>
       <button role="tab" data-panel="legacy" aria-selected="false">原实例开机</button>
@@ -256,6 +256,24 @@
 </section>
 <section id="notificationsPanel" role="tabpanel" hidden><h3>开机成功通知</h3><p class="muted">两种监控共用这些通知设置。</p>
   <div class="form-group">
+    <label><input type="checkbox" id="wechatTestEnabled" disabled style="width:auto;margin-right:8px">微信测试号通知（自己配置）</label>
+    <p class="muted">扩展直接调用微信接口，无需额外服务器。不受 Server酱免费版每天 5 条限制；仍受微信接口额度和测试用途规则约束，以测试号后台为准。</p>
+  </div>
+  <div id="wechatTestConfig" hidden>
+    <p class="muted">在微信官方测试号后台关注测试号，复制 AppID、AppSecret、关注用户的 OpenID 和模板 ID。密钥只保存在本机，并通过 HTTPS 发往微信接口。</p>
+    <div class="form-group"><label for="wechat-appId">AppID</label><input id="wechat-appId" disabled autocomplete="off"></div>
+    <div class="form-group"><label for="wechat-appSecret">AppSecret</label><input id="wechat-appSecret" type="password" disabled autocomplete="off"></div>
+    <div class="form-group"><label for="wechat-openId">接收用户 OpenID（不是微信号）</label><input id="wechat-openId" disabled autocomplete="off"></div>
+    <div class="form-group"><label for="wechat-templateId">模板 ID</label><input id="wechat-templateId" disabled autocomplete="off"></div>
+    <p class="muted">新增测试模板时，标题填写“AutoDL 通知”，模板内容完整复制以下三行：</p>
+    <pre style="white-space:pre-wrap;user-select:text;background:#f5f5f5;padding:10px">通知：{{title.DATA}}
+内容：{{content.DATA}}
+时间：{{time.DATA}}</pre>
+    <button id="wechatTestSend" type="button" disabled>发送测试通知</button>
+    <p id="wechatTestStatus" class="muted" role="status" aria-live="polite"></p>
+    <p class="muted">填写后点击输入框外自动保存。接口接受不代表手机已展示；请实际测试。提醒声音仍由微信和手机设置控制。</p>
+  </div>
+  <div class="form-group">
     <label>
       <input type="checkbox" id="enableEmail" style="width: auto; margin-right: 8px;">
       开机成功后发送微信通知（Server酱）
@@ -263,6 +281,7 @@
   </div>
 
   <div id="emailConfig" style="display: none;">
+    <p class="muted">Server酱负责转发，配置简单；免费版每天最多 5 条，套餐规则以官网为准。微信测试号由本机直接发送，需要自己配置模板和接收用户。</p>
     <div class="form-group">
       <label for="serverChanSendKey">Server酱 SendKey</label>
       <input type="password" id="serverChanSendKey" placeholder="SCTxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
@@ -326,7 +345,9 @@
     </div>
   </details>
   <script src="clone-core.js"></script>
+  <script src="wechat-test.js"></script>
   <script src="popup.js"></script>
+  <script src="wechat-test-popup.js"></script>
   <script src="clone-popup.js"></script>
   <script src="popup-navigation.js"></script>
   <script src="diagnostics.js"></script>

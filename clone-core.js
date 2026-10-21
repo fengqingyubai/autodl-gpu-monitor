@@ -52,7 +52,7 @@
       throw new Error('源实例、地区或克隆页面参数发生变化，已停止');
     }
   }
-  const api = { VERSION: '1.1.4', normalize, context, options, money, hourlyQuote, eligible, assertContext };
+  const api = { VERSION: '1.1.5', normalize, context, options, money, hourlyQuote, eligible, assertContext };
   root.CloneCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

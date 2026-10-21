@@ -38,6 +38,7 @@ function withTimeout(promise, ms, timeoutMessage) {
 }
 
 async function persistNotifySettingsFromUI() {
+  if (window.saveWechatTestSettings) await window.saveWechatTestSettings();
   const wechatEnabled = !!enableEmail.checked;
   const sendKey = (serverChanSendKey && serverChanSendKey.value) ? serverChanSendKey.value.trim() : '';
 
@@ -153,8 +154,10 @@ showEmailjsTemplateId.addEventListener('change', () => {
 });
 
 clearNotifySettingsBtn.addEventListener('click', async () => {
-  const ok = confirm('确定要清除通知配置吗？这会清除 Server酱 SendKey 与 EmailJS 配置。');
+  const ok = confirm('确定要清除所有通知配置吗？包括微信测试号、Server酱和 EmailJS 配置。');
   if (!ok) return;
+
+  if (window.clearWechatTestSettings) await window.clearWechatTestSettings();
 
   await chrome.storage.local.remove([
     'notifyWeChatEnabled',
