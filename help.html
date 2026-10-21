@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>使用说明 · AutoDL GPU 监控</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #222; background: #fff; line-height: 1.8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #2459aa; text-underline-offset: 3px; }
+    a:hover { color: #163b73; }
+    a:focus-visible { outline: 2px solid #2459aa; outline-offset: 4px; }
+    .skip { position: absolute; top: -70px; left: 16px; background: white; padding: 8px; }
+    .skip:focus { top: 8px; }
+    header { max-width: 1160px; margin: auto; padding: 38px 28px 22px; border-bottom: 1px solid #ddd; }
+    h1 { font-size: 28px; margin: 0; line-height: 1.5; }
+    header p { color: #666; margin: 8px 0 0; }
+    .layout { max-width: 1160px; margin: auto; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 48px; padding: 28px; }
+    nav { position: sticky; top: 24px; align-self: start; font-size: 14px; max-height: calc(100vh - 48px); overflow: auto; }
+    nav strong { display: block; margin-bottom: 8px; }
+    nav a { display: block; padding: 5px 0; text-decoration: none; }
+    main { min-width: 0; }
+    section { margin-bottom: 42px; scroll-margin-top: 24px; }
+    h2 { font-size: 22px; border-bottom: 1px solid #ddd; padding-bottom: 8px; margin: 0 0 16px; }
+    h3 { font-size: 17px; margin: 24px 0 8px; }
+    p { margin: 10px 0; }
+    li { margin: 8px 0; }
+    ol, ul { padding-left: 24px; }
+    .note { border-left: 3px solid #b9c8dd; padding: 8px 14px; background: #f7f9fb; margin: 16px 0; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 10px 12px; border: 1px solid #ddd; text-align: left; vertical-align: top; min-width: 100px; }
+    th { background: #f6f6f6; font-weight: 600; }
+    code { background: #f2f3f5; padding: 2px 4px; border-radius: 3px; overflow-wrap: anywhere; }
+    pre { background: #f6f6f6; border: 1px solid #ddd; padding: 14px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+    pre code { background: none; padding: 0; }
+    dt { font-weight: 600; margin-top: 20px; }
+    dd { margin: 6px 0 0; }
+    footer { border-top: 1px solid #ddd; padding: 20px 0; color: #666; font-size: 13px; }
+    @media (max-width: 760px) { header { padding: 24px 18px 18px; } h1 { font-size: 24px; } .layout { display: block; padding: 18px; } nav { position: static; max-height: none; border-bottom: 1px solid #ddd; padding-bottom: 18px; margin-bottom: 26px; } nav a { display: inline-block; margin-right: 18px; } }
+    @media print { nav, .skip { display: none; } .layout { display: block; max-width: none; } header { padding-top: 0; } section { break-inside: auto; } a { color: inherit; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#quickstart">跳到正文</a>
+  <header>
+    <h1>AutoDL GPU 监控 · 使用说明</h1>
+    <p>适用版本 1.1.6 · Edge / Chrome · 更新于 2026-10-21</p>
+    <p>这份说明随扩展保存在本机，断网也能打开。访问 AutoDL 和发送通知需要联网。</p>
+  </header>
+  <div class="layout">
+    <nav aria-label="使用说明目录">
+      <strong>目录</strong>
+      <a href="#quickstart">快速开始</a><a href="#install">安装与更新</a>
+      <a href="#modes">选择监控方式</a><a href="#clone">自动克隆</a>
+      <a href="#legacy">原实例开机</a><a href="#status">状态与停止</a>
+      <a href="#wechat">微信测试号通知</a><a href="#other-notifications">Server酱与邮箱</a>
+      <a href="#logs">诊断日志</a><a href="#faq">常见问题</a><a href="#data">数据与权限</a>
+    </nav>
+    <main>
+      <section id="quickstart">
+        <h2>快速开始</h2>
+        <p>扩展有两种用途：等待已有实例所在主机释放 GPU，或在源实例同地区寻找其他主机，自动克隆数据并开机。</p>
+        <ol>
+          <li>在安装扩展的同一个浏览器中登录 <a href="https://www.autodl.com/console/instance/list" target="_blank" rel="noopener noreferrer">AutoDL 控制台</a>。</li>
+          <li>想换主机找卡：源实例关机后，从“更多 → 克隆实例”进入，勾选数据盘并继续，打开扩展的“自动克隆”。</li>
+          <li>只想开启原来的实例：留在实例列表，打开扩展的“原实例开机”，选择要监控的实例。</li>
+          <li>按需配置“通知设置”，然后开始监控。自动克隆启动后会滚动到顶部显示状态。</li>
+          <li>保持电脑、浏览器和 AutoDL 标签页运行。成功后在控制台检查实例、数据及费用。</li>
+        </ol>
+        <p class="note">点击“开始监控并自动创建”，即允许扩展在设定条件内创建并开机一个付费实例。停止监控不能撤回已经提交的创建请求。</p>
+      </section>
+      <section id="install">
+        <h2>安装与更新</h2>
+        <h3>首次安装</h3>
+        <ol>
+          <li>从 <a href="https://github.com/txyyt/autodl-gpu-monitor" target="_blank" rel="noopener noreferrer">项目仓库</a>的 <code>main</code> 分支下载代码并解压，或使用 Git 下载。</li>
+          <li>Edge 地址栏输入 <code>edge://extensions/</code>；Chrome 输入 <code>chrome://extensions/</code>。</li>
+          <li>开启“开发人员模式”，点击“加载解压缩的扩展”，选择<strong>直接包含 manifest.json 的文件夹</strong>，不要选它的上一级。</li>
+          <li>将扩展固定到工具栏，方便打开。加载使用不需要 Python、Playwright、Node.js，也不需要安装测试依赖。</li>
+        </ol>
+        <h3>更新已有安装</h3>
+        <ol>
+          <li>先停止监控；若任务已经提交或结果不明，先查看 AutoDL 控制台。</li>
+          <li>将同一个扩展目录中的文件更新为最新版本。通过“加载解压缩的扩展”安装的版本不会自动从 GitHub 更新。</li>
+          <li>在扩展管理页点击该扩展的“重新加载”。如果浏览器要求确认新增站点权限，完成确认。</li>
+          <li><strong>刷新已打开的 AutoDL 页面</strong>，使网页脚本同步更新，再重新设置监控。</li>
+        </ol>
+        <p>优先更新原目录并重新加载，通常能保留设置和日志。不要同时启用两份扩展；改用另一目录或移除扩展可能导致配置不再沿用。</p>
+      </section>
+      <section id="modes">
+        <h2>选择监控方式</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>方式</th><th>会做什么</th><th>适合什么情况</th></tr></thead>
+          <tbody><tr><td>自动克隆</td><td>在源实例同地区寻找符合条件的其他主机，复制系统盘和数据盘，创建并开机一个新实例。</td><td>原主机长期没卡，接受换主机，想继续使用源环境和数据。</td></tr>
+          <tr><td>原实例开机</td><td>监控所选已有实例，在所在主机有可用 GPU 时开机；无卡运行的实例可能被关机后重新带卡启动。</td><td>希望保留原实例、原主机，或不想复制数据。</td></tr></tbody>
+        </table></div>
+        <p>两种方式共用通知配置。当前版本会阻止两种监控同时运行；克隆任务结果不明时也会阻止启动原实例监控。切换顶部菜单只是换界面，<strong>不等于停止任务</strong>。</p>
+        <p>原实例模式支持多选，所选实例可能依次全部开机并计费。如果只想获得一台可用实例，只选一个。自动克隆每次任务只提交一个新实例。</p>
+      </section>
+      <section id="clone">
+        <h2>自动克隆</h2>
+        <h3>1. 从正确的源实例进入</h3>
+        <ol>
+          <li>在 AutoDL 控制台找到要复制的源实例，确认实例及其数据正确，并先关机。</li>
+          <li>点击该实例的“更多 → 克隆实例”。在弹窗中勾选<strong>数据盘</strong>，然后点“继续”。</li>
+          <li>进入克隆选机页面后，先不要手动点“创建并开机”。打开扩展，切到“自动克隆”，点击“读取当前克隆页”。</li>
+          <li>核对扩展显示的源实例 ID 和地区。读取失败时，不要换成普通的“租用新实例”页面，重新从源实例进入克隆。</li>
+        </ol>
+        <p>扩展只接受源实例同地区的克隆，系统盘和数据盘都要复制。源实例仍然保留，不会被插件自动释放。原实例的保留、存储等费用以 AutoDL 为准。</p>
+        <h3>2. 设置筛选条件</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>参数</th><th>填写方法</th></tr></thead>
+          <tbody>
+            <tr><td>GPU 型号</td><td>至少选一种。Windows 按住 Ctrl 点击可多选。多选表示任一种型号都能接受，不是按选择顺序排优先级。型号精确匹配，例如 RTX 4090 与 RTX 4090D 不视为相同。</td></tr>
+            <tr><td>GPU 数量</td><td>创建一台实例需要的卡数，选项为 1–8、10、12。要求同一台主机有足够空闲卡，不会把不同主机的卡拼起来。</td></tr>
+            <tr><td>整台实例价格上限</td><td>单位为元/小时，填写大于 0、最多两位小数的金额。<strong>是所有卡的合计小时价，不是单卡价。</strong>例如单卡 1.98 元，两卡合计 3.96 元，上限填 3.00 就不会选择它。</td></tr>
+            <tr><td>检查间隔</td><td>3–3600 秒整数。它是每轮结束后的等待时间，网站加载和扫描还会增加耗时；3 秒不等于保证每 3 秒完成一轮。网络慢时可设 5–10 秒。</td></tr>
+          </tbody>
+        </table></div>
+        <p>只支持按量计费。价格核对读取页面的“配置费用（元/时）”，不把“日常费用（元/日）”或余额当作小时价。小时价上限不代表总支出上限，开机多久、存储费用及最终账单仍需要自己管理。</p>
+        <p>扩展不自动增加付费数据盘容量。源实例数据容量与目标主机不兼容、需要扩容或出现额外费用时，请先手动核对页面配置。</p>
+        <h3>3. 开始监控</h3>
+        <p>点击“开始监控并自动创建”。顶部显示当前状态、已检查轮数和下一轮等待时间。每轮通过切换一个选中的 GPU 筛选项来刷新 AutoDL 主机列表，并检查库存、型号、卡数和价格。</p>
+        <p>运行期间不要手动更换地区、源实例、计费方式、筛选条件或提交创建。需要修改条件时先停止，重新设置后再开始。</p>
+        <h3>4. 创建与核实结果</h3>
+        <p>找到合格主机后，扩展选中它并核对最终小时价，再提交一次创建。提交后会短暂打开后台实例列表标签页来核实结果，读完自动关闭。通常约每 30 秒核实一次；数据复制耗时不包含在检查间隔内。</p>
+        <p>只有唯一匹配的新实例已经带 GPU 运行，才判定成功并发送成功通知。跟踪期间不要在同一目标主机手动创建相同规格实例，以免无法区分。</p>
+        <p>提交结果不明或长时间未完成时，插件会保留提交锁，避免重复创建。额外确认弹窗可能需要人工处理。看到页面错误或“卡被占用”后，先看插件状态和实例列表，不要连续点击创建。</p>
+      </section>
+      <section id="legacy">
+        <h2>原实例开机</h2>
+        <ol>
+          <li>打开 AutoDL 的“容器实例”列表并保持登录。</li>
+          <li>扩展切到“原实例开机”，点击“刷新实例列表”。</li>
+          <li>选择目标实例；按住 Ctrl 可以多选。核对名称，<strong>不要选中正在运行重要任务的实例</strong>。</li>
+          <li>选择检查间隔：3、5、10、15、30 或 60 秒，默认 5 秒。</li>
+          <li>点击“开始监控”，确认状态显示已开启。</li>
+        </ol>
+        <p>已关机的实例在有 GPU 时会尝试开机。处于“无卡模式运行”的实例在有卡时可能被关机、再带 GPU 开机，因此其中正在执行的 CPU 任务也可能中断。</p>
+        <p>每成功处理一个实例就将其移出监控列表，直到所有选中实例完成后停止。手动停止可阻止后续检查，但已经发出的开关机请求仍需要在控制台核对。</p>
+      </section>
+      <section id="status">
+        <h2>状态、停止与提交锁</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>看到的状态</th><th>含义与操作</th></tr></thead>
+          <tbody>
+            <tr><td>正在检查 / 等待下一轮</td><td>监控已开启；暂时没找到符合条件的库存会继续等待。轮数在一轮扫描完成后增加，不会一启动就增加。</td></tr>
+            <tr><td>正在提交 / 核实新实例</td><td>创建已进入提交流程。等待结果，检查是否存在需要人工确认的弹窗。</td></tr>
+            <tr><td>已成功</td><td>已确认新实例带 GPU 运行。检查新实例的系统环境、数据盘和计费，再开始工作。</td></tr>
+            <tr><td>出错 / 结果不明</td><td>先读完整状态说明，再检查控制台和日志。不要把“没有立刻看到新实例”当作一定没有创建。</td></tr>
+            <tr><td>已停止</td><td>后续监控停止。它不会释放实例、关掉已成功的新实例，也不会撤销已经提交的操作。</td></tr>
+          </tbody>
+        </table></div>
+        <p>需要解除锁定时，先确认控制台里是否存在新建、创建中或运行中的实例，以及是否有尚未完成的请求。确认后再点击“已核实控制台，解除提交锁定”。这个按钮只解除本地锁定，不会取消远端任务。</p>
+        <p>提交前发现库存被抢或报价变化，可以继续监控；提交后的错误不会仅凭猜测自动重试。网站提示可能变化，结果不明时优先核实控制台。</p>
+      </section>
+      <section id="wechat">
+        <h2>微信测试号通知</h2>
+        <p>适合个人自用和开发测试。扩展直接请求微信官方接口，不需要额外服务器，也不需要电脑微信客户端保持登录。不经过 Server酱，所以不受 Server酱免费版每天 5 条限制；仍有微信自己的额度、权限和测试用途规则，以后台为准。</p>
+        <h3>1. 登录并关注测试号</h3>
+        <ol>
+          <li>打开 <a href="https://mp.weixin.qq.com/debug/cgi-bin/sandbox?t=sandbox/login" target="_blank" rel="noopener noreferrer">微信官方测试号后台</a>，用个人微信扫码登录。</li>
+          <li>找到测试号信息中的 AppID 和 AppSecret。不要将 AppSecret 发给别人或放到公开截图中。</li>
+          <li>用需要收通知的微信扫描后台的测试号二维码并关注。在关注用户列表中复制这个用户的 OpenID。<strong>OpenID 不是微信号，也不是昵称。</strong></li>
+        </ol>
+        <h3>2. 创建六行消息模板</h3>
+        <p>新增测试模板，标题填“AutoDL 通知”，完整复制以下内容，花括号、字段名和 DATA 大小写都保持一致：</p>
+        <pre><code>通知：{{title.DATA}}
+内容：{{content.DATA}}
+主机：{{host.DATA}}
+实例：{{instance.DATA}}
+配置：{{spec.DATA}}
+时间：{{time.DATA}}</code></pre>
+        <p>保存后复制生成的模板 ID。已有旧三行模板的用户，请新建为这份六行模板，再替换插件里的模板 ID；仅更新扩展不会改变微信后台的模板。</p>
+        <h3>3. 在扩展里保存并测试</h3>
+        <ol>
+          <li>打开“通知设置”，勾选“微信测试号通知”。</li>
+          <li>分别填入 AppID、AppSecret、接收用户 OpenID、模板 ID。</li>
+          <li>点击输入框外会自动保存；点击“发送测试通知”也会先保存当前填写内容。</li>
+          <li>检查手机实际收信，确认通知、主机、实例、配置、时间均有显示。测试中的主机与配置只是示例，不代表真的创建了实例。</li>
+        </ol>
+        <p>“微信接口已接受”表示接口返回成功，不保证手机已弹窗或已读。若收不到，请先检查关注用户、通知开关和手机系统设置。一般不需要配置测试号的消息接收服务器 URL/Token，因为扩展只主动发消息，不接收回调。</p>
+        <h3>为什么内容被省略，或没有“详情”？</h3>
+        <p>微信可能将过长的单个字段省略，不能靠换行强制展开。新版用简短状态，并将主机、实例 ID、配置独立展示；特别长的字段仍可能被省略。当前不提供独立的详情网页，也不设置跳转到 AutoDL。旧消息已有的跳转链接不会被更新修改。</p>
+        <p>原实例模式未提供某些字段时会显示“未提供”。提醒声音、锁屏展示和勿扰规则由微信与手机控制，插件不能强制让手机响铃。</p>
+        <h3>常见接口错误</h3>
+        <div class="table-wrap"><table><thead><tr><th>错误码</th><th>处理方法</th></tr></thead><tbody>
+          <tr><td>40013 / 40125</td><td>核对 AppID / AppSecret，确认都属于同一个测试号。</td></tr>
+          <tr><td>40003</td><td>OpenID 无效；从当前测试号关注用户列表重新复制。</td></tr>
+          <tr><td>40037</td><td>模板 ID 无效；确认模板属于当前测试号。</td></tr>
+          <tr><td>43004</td><td>接收用户未关注测试号，先关注。</td></tr>
+          <tr><td>40164</td><td>按后台要求配置当前电脑的公网出口 IP 白名单；切换网络后可能需要更新。</td></tr>
+          <tr><td>45009 / 48001</td><td>达到微信接口额度 / 缺少接口权限，查看后台配额和权限表。</td></tr>
+          <tr><td>网络失败 / 超时</td><td>检查网络。超时可能已被微信接受，先查手机；插件不会自动重发此类请求。</td></tr>
+        </tbody></table></div>
+      </section>
+      <section id="other-notifications">
+        <h2>Server酱与邮箱通知</h2>
+        <p>通知设置由两种监控共用。可只启用一种，也可以同时启用多个通道；多个通道会分别发送，可能收到重复提醒。通知发送失败不代表开机失败，请以控制台和监控状态为准。</p>
+        <h3>Server酱</h3>
+        <ol>
+          <li>到 <a href="https://sct.ftqq.com/" target="_blank" rel="noopener noreferrer">Server酱官网</a>扫码登录，在其后台绑定接收通道，先用网站的测试功能确认收信。</li>
+          <li>复制 <code>SCT</code> 开头的 SendKey；插件当前使用的是 Turbo 接口，不支持直接填其他版本的地址。</li>
+          <li>在扩展“通知设置”中勾选 Server酱通知，填写 SendKey，点击输入框外保存。</li>
+        </ol>
+        <p>Server酱负责转发，设置相对简单。免费版每天最多 5 条，实际额度及套餐规则以其官网为准。它的 SendKey 与微信测试号的 AppSecret 是两种不同配置，不要互填。</p>
+        <h3>EmailJS 邮箱</h3>
+        <ol>
+          <li>在 <a href="https://www.emailjs.com/" target="_blank" rel="noopener noreferrer">EmailJS</a> 注册，添加可发送邮件的服务并创建模板。额度、账户限制和接口访问设置以 EmailJS 后台为准。</li>
+          <li>模板收件人使用 <code>{{to_email}}</code>，主题使用 <code>{{subject}}</code>，正文使用 <code>{{message}}</code>。</li>
+          <li>从后台获取 Public Key、Service ID、Template ID；在扩展勾选邮箱通知，填入这三项和实际收件邮箱，点击输入框外保存。</li>
+          <li>先在 EmailJS 后台验证服务和模板可发信。插件当前只有微信测试号的独立测试按钮；邮箱通道在成功开机后发送。</li>
+        </ol>
+        <p>不需要在代码里填写密钥、不需要修改扩展安全策略，也不需要下载外部 SDK。收不到邮件时检查垃圾箱、服务授权、模板变量和后台发送记录。</p>
+        <p>“清除通知配置”会同时删除微信测试号、Server酱和 EmailJS 的配置。只想暂停某个通道，取消其勾选即可。</p>
+      </section>
+      <section id="logs">
+        <h2>诊断日志</h2>
+        <p>扩展弹窗底部展开“诊断日志”，可以查看记录数量与占用、导出文件或清空。日志只保存在本机，最多 <strong>512 KiB 或 1000 条</strong>，先达到哪个就按哪个限制淘汰最旧记录。重新加载扩展或重启浏览器后仍保留。</p>
+        <p>主要记录克隆任务的状态、轮数、脚本版本、候选库存和报价比较，以及微信测试号通知的接口结果。它不是 AutoDL 全部操作的审计记录，也不会补录旧版没有保存的历史过程。</p>
+        <ol>
+          <li>遇到问题先保留页面和状态，展开“诊断日志”，点击“导出日志”。</li>
+          <li>保存浏览器下载的 <code>autodl-diagnostics-时间.jsonl</code> 文件。</li>
+          <li>反馈时附上文件、实际操作步骤、期望结果及出错时间；页面截图可补充现场提示，注意遮住密钥和密码。</li>
+        </ol>
+        <p>日志包含版本、时间、状态及最近克隆任务摘要。报价错误时可看到小时配置价、单卡价、卡数、计算总价和上限。导出、清空都不改变任务或解除提交锁。</p>
+        <p>日志不自动上传，不记录 Cookie、SSH 密码、页面 HTML 或通知密钥，并对常见敏感文本做脱敏。实例 ID、地区等排查信息仍可能存在，发送前可以自行检查。</p>
+      </section>
+      <section id="faq">
+        <h2>常见问题</h2>
+        <dl>
+          <dt>关闭扩展弹窗后还会运行吗？</dt><dd>不需要一直打开弹窗。浏览器和对应 AutoDL 标签页需要保持运行，电脑不能休眠；关闭弹窗也不等于停止任务。</dd>
+          <dt>需要一直让 AutoDL 标签页在最前面吗？</dt><dd>可以切换标签页，但后台标签页可能被浏览器限速、休眠或丢弃。将 AutoDL 加入 Edge 不休眠站点，并保持电脑唤醒，实际刷新周期仍取决于浏览器和网站。</dd>
+          <dt>重启浏览器后是否自动恢复？</dt><dd>设置、日志和克隆任务状态可以保留，但不要假定监控必然持续恢复。重新打开 AutoDL、确认登录及控制台，再检查扩展状态。已提交或结果不明的任务先核实，避免重复创建。</dd>
+          <dt>页面提示版本不一致，或更新后界面仍是旧版？</dt><dd>确认扩展管理页加载的是最新文件所在目录，重新加载扩展，再刷新 AutoDL 页面。只更新 GitHub 文件或只重开弹窗，都不能替换网页中已运行的旧脚本。</dd>
+          <dt>有库存却没有选中？</dt><dd>核对型号是否精确匹配、同一主机空闲卡数是否足够、主机是否可选、所有卡合计小时价是否在上限内，以及源地区是否正确。全站有卡不代表源地区有卡。</dd>
+          <dt>报价核对失败怎么办？</dt><dd>先查看状态中显示的实际配置小时价、单卡价、卡数和上限。不要把日常费用或单卡价当成总价。确认参数无误后导出日志，网站报价结构变化也可能导致停止。</dd>
+          <dt>检查轮数为什么暂时不动？</dt><dd>完成一轮才计数。页面正在加载、扫描或创建跟踪时可能不增加；长时间没有进展时查看状态说明、登录状态和日志。</dd>
+          <dt>卡被别人抢了，会继续吗？</dt><dd>在点击创建前发现库存变化，会继续监控。点击后不能只凭模糊提示认定失败并重试；扩展会核实新实例，必要时保留锁定，防止创建多台。</dd>
+          <dt>克隆成功后源实例会被删掉吗？</dt><dd>不会，源实例保留。请自己确认新实例数据和环境正常，再决定怎样处理源实例以及后续费用。</dd>
+          <dt>能保证一定抢到卡吗？</dt><dd>不能。库存会被其他用户同时竞争，页面和网络也有延迟；缩短间隔不能消除这些因素。</dd>
+        </dl>
+      </section>
+      <section id="data">
+        <h2>本机数据与扩展权限</h2>
+        <p>扩展通过已登录的 AutoDL 页面执行监控与操作，不要求提供账号密码。通知配置保存在浏览器扩展的本地存储中，不是系统加密保险库；不要共享扩展配置存储或包含密钥的截图。</p>
+        <div class="table-wrap"><table><thead><tr><th>权限 / 站点</th><th>用途</th></tr></thead><tbody>
+          <tr><td>storage</td><td>保存配置、克隆任务状态、提交锁和有大小上限的日志。</td></tr>
+          <tr><td>tabs / scripting</td><td>查找 AutoDL 标签页、注入网页脚本、读取状态及操作页面。</td></tr>
+          <tr><td>notifications / alarms</td><td>显示电脑通知，以及定期核实克隆创建结果。</td></tr>
+          <tr><td>www.autodl.com</td><td>实例列表与克隆页面。</td></tr>
+          <tr><td>api.weixin.qq.com</td><td>将测试号凭据发往微信官方接口获取凭证，发送模板消息。</td></tr>
+          <tr><td>sctapi.ftqq.com / api.emailjs.com</td><td>按所启用的通道发送微信或邮箱通知。</td></tr>
+        </tbody></table></div>
+        <p>打开本说明不读取通知密钥，也不发起监控或收费操作。外部网站链接会在新标签页打开；说明页本身没有外部图片、统计脚本或远程依赖。</p>
+      </section>
+      <footer><a href="#quickstart">回到顶部</a> · <a href="https://github.com/txyyt/autodl-gpu-monitor" target="_blank" rel="noopener noreferrer">项目仓库</a> · v1.1.6</footer>
+    </main>
+  </div>
+</body>
+</html>
