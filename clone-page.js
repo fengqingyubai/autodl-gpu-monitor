@@ -7,6 +7,7 @@
   let busy = false;
   let reloadTimer;
   let retryDelay = 0;
+  let submissionObserver;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const visible = e => !!e && !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
   const text = e => C.normalize(e?.innerText || e?.textContent);
@@ -32,7 +33,9 @@
     if (enabled.length !== 1 || selected.length !== 1) throw new Error('地区未锁定到唯一的源实例地区');
     const models = inputs(filter('GPU型号'), 'checkbox').map(e => e.value).filter(v => !['false', 'CPU'].includes(v));
     if (!models.length) throw new Error('GPU 型号尚未加载，请等待页面加载完成');
-    return { ...ctx, adapterVersion: C.VERSION, dataCenter: selected[0].value, regionName: text(selected[0].closest('label')), models };
+    const imageCuda = new URL(location.href).searchParams.get('image_cuda');
+    return { ...ctx, imageCuda: C.cudaVersion(imageCuda) ? imageCuda : null,
+      adapterVersion: C.VERSION, dataCenter: selected[0].value, regionName: text(selected[0].closest('label')), models };
   }
   function machines() {
     return Array.from(document.querySelectorAll('.el-table__body tr')).flatMap(row => {
@@ -44,7 +47,8 @@
       const model = C.normalize((modelNode?.innerHTML || '').split(/<br\s*\/?\s*>/i)[0].replace(/<[^>]+>/g, ''));
       // Ignore struck-through original prices; the first live price span is the payable card price.
       const priceNode = cells[8].querySelector('.price > span:not([style*="line-through"])');
-      return [{ id: radio.value, name: text(cells[1]), model,
+      const cuda = text(cells[7]).match(/CUDA\s*[:：]\s*(\d+\.\d+(?:\.\d+)?)/i)?.[1] || null;
+      return [{ id: radio.value, name: text(cells[1]), model, cuda,
         available: free ? Number(free[1]) : -1, price: C.money(text(priceNode)),
         enabled: !radio.disabled, row, radio }];
     });
@@ -123,7 +127,9 @@
     for (let i = 0; i < 200; i++) {
       await current(job);
       const rows = machines();
-      const matches = rows.filter(m => C.eligible(m, job.config)).sort((a, b) => a.price - b.price);
+      const matches = rows.filter(m => !(job.excludedHosts || []).includes(m.id) &&
+        !(job.hostCooldowns?.[m.id] > Date.now()) &&
+        C.eligible(m, job.config, job.context.imageCuda)).sort((a, b) => a.price - b.price);
       if (matches.length) return matches[0];
       if (rows.length && rows.some(m => m.available >= 0 && m.available < job.config.count)) return null;
       const fingerprint = rows.map(m => m.id).join('|');
@@ -142,7 +148,7 @@
     await settle(job);
     const checked = machines().filter(m => m.radio.checked);
     const fresh = checked.find(m => m.id === machine.id);
-    if (checked.length !== 1 || !fresh || !C.eligible(fresh, job.config)) {
+    if (checked.length !== 1 || !fresh || !C.eligible(fresh, job.config, job.context.imageCuda)) {
       const error = new Error('候选主机库存已变化，继续等待'); error.stockChanged = true; throw error;
     }
     const count = inputs(filter('GPU数量'), 'radio').find(e => e.checked)?.value;
@@ -154,7 +160,8 @@
       await rpc('cloneDiagnostic', { id: job.id, event: 'price.check', details: {
         hourlyQuote: quoted ?? null, dailyQuote: Number(document.querySelector('.sum .daily-cost .num')?.textContent),
         quoteSource: '配置费用', cardPrice: fresh.price, expectedTotal: fresh.price * job.config.count,
-        maxPrice: job.config.maxPrice, count: job.config.count, candidateId: fresh.id, selectedModel: fresh.model
+        maxPrice: job.config.maxPrice, count: job.config.count, candidateId: fresh.id, selectedModel: fresh.model,
+        imageCuda: job.context.imageCuda, hostCuda: fresh.cuda
       } }).catch(() => {});
     }
     if (quoted > job.config.maxPrice || Math.abs(quoted - fresh.price * job.config.count) > 0.011) {
@@ -166,7 +173,7 @@
         Number(new URL(location.href).searchParams.get('expand_size') || 0) !== 0) {
       throw new Error('检测到付费数据盘扩容，请先处理容量和费用后再监控');
     }
-    return { id: fresh.id, name: fresh.name, model: fresh.model, price: fresh.price, total: quoted };
+    return { id: fresh.id, name: fresh.name, model: fresh.model, price: fresh.price, total: quoted, cuda: fresh.cuda };
   }
   async function run() {
     if (busy || location.pathname !== '/cloneInstance') return;
@@ -176,6 +183,7 @@
       const response = await rpc('cloneJob');
       job = response?.job;
       if (!job || job.phase !== 'watching') return;
+      submissionObserver?.disconnect();
       if (job.config.preview === true) throw new Error('旧版预览任务已停止，请在新版界面重新开始监控');
       await current(job);
       await rpc('cloneProgress', { id: job.id, message: '正在刷新库存…', stage: 'scanning' });
@@ -184,12 +192,14 @@
       await rpc('cloneDiagnostic', { id: job.id, event: 'scan.result', details: {
         models: job.config.models, selectedModels: inputs(filter('GPU型号'), 'checkbox').filter(e => e.checked).map(e => e.value),
         rows: machines().length, candidateId: found?.id, candidateName: found?.name,
-        selectedModel: found?.model, available: found?.available, cardPrice: found?.price
+        selectedModel: found?.model, available: found?.available, cardPrice: found?.price,
+        imageCuda: job.context.imageCuda, hostCuda: found?.cuda,
+        incompatibleHosts: machines().filter(m => C.cudaCompatible(job.context.imageCuda, m.cuda) === false).map(m => m.name)
       } }).catch(() => {});
       await rpc('cloneRoundComplete', { id: job.id, roundId: crypto.randomUUID() });
       retryDelay = 0;
       if (!found) {
-        await schedule(job, '等待符合条件的库存');
+        await schedule(job, job.context.imageCuda ? `等待符合条件的库存（镜像 CUDA ${job.context.imageCuda}，跳过已知不兼容主机）` : '等待符合条件的库存');
         return;
       }
       await rpc('cloneProgress', { id: job.id, message: `发现 ${found.name} ${found.model}，正在核对配置费用`, stage: 'checking' });
@@ -198,6 +208,14 @@
       const create = Array.from(document.querySelectorAll('button')).filter(visible)
         .filter(e => text(e) === '创建并开机');
       if (create.length !== 1 || create[0].disabled) throw new Error('创建并开机按钮不可用');
+      const blocking = submissionDialogs();
+      if (blocking.length) {
+        for (const node of blocking) await rpc('cloneDiagnostic', { id: job.id, event: 'page.feedback', details: {
+          notice: String((node.querySelector('.el-message-box__message, .el-dialog__body') || node).textContent || '').trim().slice(0, 4000),
+          noticeKind: 'dialog', stage: 'before-click', clicked: false
+        } }).catch(() => {});
+        throw new Error('页面有待处理弹窗，请关闭或处理后重新开始');
+      }
       // A durable one-shot barrier is persisted by the background before any billable click.
       const permit = await rpc('cloneReserve', { id: job.id, selected });
       if (!permit?.success) throw new Error(permit?.error || '提交被取消');
@@ -205,15 +223,20 @@
       // Recheck the entire selection after awaiting the worker; no automatic confirmation of other dialogs.
       C.assertContext(pageContext(), job.context);
       const fresh = machines().find(m => m.id === selected.id && m.radio.checked);
-      if (!fresh || !C.eligible(fresh, job.config) || C.hourlyQuote(document) !== selected.total) {
+      if (!fresh || !C.eligible(fresh, job.config, job.context.imageCuda) || C.hourlyQuote(document) !== selected.total) {
         const error = new Error('提交前库存或报价变化，继续监控'); error.stockChanged = true; throw error;
       }
       const allowed = await rpc('clonePermit', { id: job.id, attemptId });
       if (!allowed?.success) throw new Error('提交已取消');
-      observeSubmission(job, attemptId);
+      const inspectSubmission = observeSubmission(job, attemptId);
       clicked = true;
       create[0].click();
       await rpc('cloneClicked', { id: job.id, attemptId });
+      await rpc('cloneDiagnostic', { id: job.id, event: 'submit.clicked', details: {
+        candidateId: selected.id, candidateName: selected.name, clicked: true,
+        message: '已点击创建按钮，尚未证明订单被接受'
+      } }).catch(() => {});
+      await inspectSubmission();
       // The next page may show a required confirmation; leave it for the user. Never repeat the click.
     } catch (error) {
       if (!job) return;
@@ -237,19 +260,64 @@
     clearTimeout(reloadTimer);
     reloadTimer = setTimeout(() => run(), delay);
   }
+  function submissionDialogs() {
+    return Array.from(document.querySelectorAll('.el-message-box, .el-dialog, [role="dialog"]')).filter(visible)
+      .filter(node => !Array.from(node.querySelectorAll('.el-message-box, .el-dialog')).some(visible));
+  }
   function observeSubmission(job, attemptId) {
-    const selector = '.el-message--error, .el-notification--error';
-    const seen = new Set(Array.from(document.querySelectorAll(selector)).map(text));
-    const observer = new MutationObserver(() => {
-      for (const node of document.querySelectorAll(selector)) {
-        const notice = text(node).slice(0, 1000);
-        if (!visible(node) || !notice || seen.has(notice)) continue;
-        seen.add(notice);
-        rpc('cloneSubmissionNotice', { id: job.id, attemptId, notice }).catch(() => {});
+    const selector = '.el-message, .el-notification, .el-message--error, .el-notification--error';
+    const noticeText = node => {
+      const body = node.querySelector('.el-notification__content, .el-message__content, .el-message-box__message, .el-dialog__body') || node;
+      return String(body.textContent || body.innerText || '').trim().slice(0, 4000);
+    };
+    const seen = new Map(Array.from(document.querySelectorAll(selector)).filter(visible).map(node => [node, noticeText(node)]));
+    let inspecting = false, inspectAgain = false;
+    async function inspect() {
+      if (inspecting) { inspectAgain = true; return; }
+      inspecting = true;
+      try {
+      for (const node of [...document.querySelectorAll(selector), ...submissionDialogs()]) {
+        if (!visible(node)) { seen.delete(node); continue; }
+        const notice = noticeText(node);
+        if (!notice || seen.get(node) === notice) continue;
+        seen.set(node, notice);
+        const noticeKind = node.matches('.el-notification, .el-notification--error') ? 'notification' :
+          node.matches('.el-message, .el-message--error') ? 'message' : 'dialog';
+        await rpc('cloneSubmissionNotice', { id: job.id, attemptId, notice, noticeKind });
+        const reselect = Array.from(node.querySelectorAll('button')).filter(e => visible(e) && !e.disabled && text(e) === '重新选择');
+        const reason = C.stockRejected(notice) && noticeKind !== 'dialog' ? 'stock' :
+          C.cudaRejected(notice) && reselect.length === 1 ? 'cuda' : null;
+        if (!reason) continue;
+        // Only this observed, explicit non-creation validation is allowed to release a clicked attempt.
+        // Never click a generic confirmation, purchase button or guessed stock-rejection dialog.
+        const pending = await rpc('cloneJob');
+        if (pending.job?.id !== job.id || pending.job.attemptId !== attemptId ||
+            !['submitting', 'submitted'].includes(pending.job.phase)) continue;
+        if (reason === 'cuda') {
+          reselect[0].click();
+          await sleep(200);
+          if (visible(node)) continue;
+        }
+        const result = await rpc('cloneSubmissionRejected', { id: job.id, attemptId, notice, reason, candidateId: pending.job.selected.id });
+        if (result.success) {
+          observer.disconnect();
+          await schedule(job, reason === 'cuda' ? '目标主机 CUDA 不兼容，已跳过，继续监控' : '库存已被占用，刷新后继续监控（该主机暂避 30 秒）');
+        }
       }
-    });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    setTimeout(() => observer.disconnect(), 15000);
+      } finally {
+        inspecting = false;
+        if (inspectAgain) {
+          inspectAgain = false;
+          Promise.resolve().then(inspect).catch(() => {});
+        }
+      }
+    }
+    const observer = new MutationObserver(() => { inspect().catch(() => {}); });
+    submissionObserver?.disconnect();
+    submissionObserver = observer;
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['style', 'class'] });
+    setTimeout(() => observer.disconnect(), 20 * 60 * 1000);
+    return inspect;
   }
   chrome.runtime.onMessage.addListener((request, sender, respond) => {
     if (request.action === 'cloneContext') {

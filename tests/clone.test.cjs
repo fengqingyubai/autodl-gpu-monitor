@@ -161,7 +161,7 @@ test('DOM adapter reads live-style clone controls, ignores old price and fails o
     Object.defineProperty(input, 'disabled', { get: () => input.hasAttribute('disabled') });
     if (input.type === 'checkbox') input.closest('label')?.addEventListener('click', () => input.toggleAttribute('checked'));
   }
-  const sandbox = { CloneCore: C, window, document, location: { href: url }, console, setInterval: () => 1,
+  const sandbox = { CloneCore: C, window, document, location: { href: url }, URL, console, setInterval: () => 1,
     chrome: { runtime: { onMessage: { addListener() {} } } } };
   vm.createContext(sandbox);
   const source = fs.readFileSync(path.join(root, 'clone-page.js'), 'utf8')
@@ -177,7 +177,9 @@ test('DOM adapter reads live-style clone controls, ignores old price and fails o
   assert.throws(() => sandbox.adapter.pageContext(), /地区未锁定/);
 });
 
-async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, cancelOnReserve = false, lostOnSelect = false } = {}) {
+async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, cancelOnReserve = false, lostOnSelect = false,
+  imageCuda, hostCuda = '13.0', notice, noticeKind = 'notification', preexistingNotice,
+  excludedHosts = [], hostCooldowns = {} } = {}) {
   const { parseHTML } = require('linkedom');
   const { document, window } = parseHTML(`<html><body>
     克隆实例仅能在同一地区内进行，以实例：source-abc的系统创建新实例
@@ -192,7 +194,7 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
       <div class="el-table__body-wrapper"><table class="el-table__body"><tbody><tr>
         <td><input type="radio" value="host123"></td><td>123机</td>
         <td><div class="cell"><div>RTX 4090<br>24GB</div></div></td><td>${available} / 8</td>
-        <td>CPU</td><td>Xeon</td><td>50GB</td><td>13.0</td>
+        <td>CPU</td><td>Xeon</td><td>50GB</td><td>驱动: 580.105.08 CUDA: ${hostCuda}</td>
         <td><div class="price"><span>￥1.98</span>/时</div></td>
       </tr></tbody></table></div></div><div class="sum">
         <div class="daily-cost"><span class="pay-mode">日常费用：</span><span class="rmb">￥</span><span class="num">0.00</span><span class="unit">/日</span></div>
@@ -212,27 +214,61 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
   const create = document.querySelector('button');
   create.getClientRects = () => [1];
   let clicks = 0;
-  create.addEventListener('click', () => clicks++);
+  let reselects = 0;
+  function appendNotice(value, kind = 'notification') {
+    const node = document.createElement('div');
+    node.className = kind === 'dialog' ? 'el-message-box' : 'el-notification';
+    const content = document.createElement('div');
+    content.className = kind === 'dialog' ? 'el-message-box__message' : 'el-notification__content';
+    content.textContent = value; node.append(content);
+    let shown = true;
+    node.getClientRects = () => shown ? [1] : [];
+    if (kind === 'dialog') {
+      const button = document.createElement('button'); button.textContent = '重新选择';
+      button.getClientRects = () => shown ? [1] : [];
+      button.addEventListener('click', () => { reselects++; shown = false; node.remove(); }); node.append(button);
+    }
+    document.body.append(node);
+  }
+  if (preexistingNotice) appendNotice(preexistingNotice);
+  create.addEventListener('click', () => {
+    clicks++;
+    if (notice) appendNotice(notice, noticeKind);
+  });
   const actions = [];
+  const requests = [];
   let reloadScheduled = false;
   const job = watching(preview);
-  const sandbox = { CloneCore: C, window, document, location: { href: url, pathname: '/cloneInstance', reload() {} },
+  const observers = [];
+  const pageUrl = imageCuda ? `${url}&image_cuda=${imageCuda}` : url;
+  job.context = { ...job.context, ...C.context(pageUrl), imageCuda };
+  job.excludedHosts = excludedHosts; job.hostCooldowns = hostCooldowns;
+  const sandbox = { CloneCore: C, window, document, location: { href: pageUrl, pathname: '/cloneInstance', reload() {} },
     console, URL, crypto: require('node:crypto').webcrypto, Event: window.Event,
-    MutationObserver: class { observe() {} disconnect() {} }, clearTimeout() {}, setInterval: () => 1,
+    MutationObserver: class { constructor(callback) { this.callback = callback; observers.push(this); }
+      observe() { this.active = true; } disconnect() { this.active = false; } }, clearTimeout() {}, setInterval: () => 1,
     setTimeout: (fn, ms) => { if (ms >= 10000) reloadScheduled = true; else queueMicrotask(fn); return 1; },
     chrome: { runtime: { onMessage: { addListener() {} }, sendMessage: async request => {
       actions.push(request.action);
+      requests.push(request);
       if (request.action === 'cloneError') actions.push(request.message);
       if (request.action === 'cloneJob') return { job };
-      if (request.action === 'cloneReserve') { job.phase = cancelOnReserve ? 'stopped' : 'submitting'; return { success: true }; }
+      if (request.action === 'cloneReserve') { job.phase = cancelOnReserve ? 'stopped' : 'submitting'; job.selected = request.selected; job.attemptId = 'attempt'; return { success: true, attemptId: 'attempt' }; }
       if (request.action === 'clonePermit') return { success: job.phase === 'submitting' };
+      if (request.action === 'cloneClicked') job.phase = 'submitted';
+      if (request.action === 'cloneSubmissionRejected') job.phase = 'watching';
       return { success: true };
     } } } };
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(root, 'clone-page.js'), 'utf8')
     .replace('  chrome.runtime.onMessage.addListener', '  globalThis.runAdapter = run;\n  chrome.runtime.onMessage.addListener'), sandbox);
   await sandbox.runAdapter();
-  return { clicks, actions, reloadScheduled };
+  return { clicks, actions, reloadScheduled, requests, job, reselects,
+    emitNotice: async (value, kind) => {
+      appendNotice(value, kind);
+      for (const observer of observers) if (observer.active) observer.callback();
+      await new Promise(resolve => setImmediate(resolve));
+    } };
 }
 test('old preview jobs are stopped during migration instead of unexpectedly creating', async () => {
   const result = await pageWorkflow({ preview: true });
@@ -334,4 +370,125 @@ test('no stock schedules refresh; changed checkout total fails closed', async ()
   assert.ok(changed.actions.includes('cloneError'));
   assert.equal(changed.actions.includes('cloneReserve'), false);
   assert.equal(changed.clicks, 0);
+});
+
+const cudaNotice = '镜像的CUDA版本高于主机支持的最高CUDA版本，将导致无法开机，请重新选择主机/镜像';
+const stockNotice = 'GPU库存发生变更，请刷新后重新选择';
+
+test('CUDA comparisons use major/minor versions and preserve unknown values', () => {
+  assert.equal(C.cudaCompatible('12.8', '12.4'), false);
+  assert.equal(C.cudaCompatible('12.8', '13.0'), true);
+  assert.equal(C.cudaCompatible('12.10', '12.9'), false);
+  assert.equal(C.cudaCompatible('13.0', '13.0'), true);
+  assert.equal(C.cudaCompatible('12.8', null), null);
+  assert.equal(C.cudaCompatible(null, '12.4'), null);
+  assert.equal(C.eligible({ ...machine, cuda: '12.4' }, config, '12.8'), false);
+  assert.equal(C.cudaRejected(cudaNotice), true);
+  assert.equal(C.stockRejected(stockNotice), true);
+  assert.equal(C.stockRejected('请求超时，GPU库存发生变更，请刷新后重新选择'), false);
+  assert.equal(C.stockRejected('GPU资源发生变化'), false);
+});
+
+test('page skips known incompatible, excluded and cooling-down hosts before a billable click', async () => {
+  for (const options of [{ imageCuda: '12.8', hostCuda: '12.4' }, { excludedHosts: ['host123'] },
+    { hostCooldowns: { host123: Date.now() + 30000 } }]) {
+    const result = await pageWorkflow(options);
+    assert.equal(result.clicks, 0);
+    assert.equal(result.actions.includes('cloneReserve'), false);
+    assert.equal(result.actions.includes('cloneError'), false);
+  }
+  assert.equal((await pageWorkflow({ imageCuda: '12.8', hostCuda: '13.0' })).clicks, 1);
+});
+
+test('page captures plain Element UI notifications and resumes only exact stock rejection', async () => {
+  const rejected = await pageWorkflow({ notice: stockNotice });
+  assert.equal(rejected.clicks, 1);
+  assert.ok(rejected.actions.includes('cloneSubmissionRejected'));
+  assert.equal(rejected.requests.find(r => r.action === 'cloneSubmissionRejected').reason, 'stock');
+  assert.equal(rejected.job.phase, 'watching');
+  const unknown = await pageWorkflow({ notice: '订单处理异常，请联系管理员\n请求编号：example' });
+  assert.equal(unknown.clicks, 1);
+  assert.equal(unknown.actions.includes('cloneSubmissionRejected'), false);
+  assert.equal(unknown.job.phase, 'submitted');
+  const feedback = unknown.requests.find(r => r.action === 'cloneSubmissionNotice');
+  assert.equal(feedback.notice, '订单处理异常，请联系管理员\n请求编号：example');
+  assert.equal(feedback.noticeKind, 'notification');
+});
+
+test('CUDA modal reselects and resumes; unknown modal is recorded without pressing its button', async () => {
+  const rejected = await pageWorkflow({ notice: cudaNotice, noticeKind: 'dialog' });
+  assert.equal(rejected.reselects, 1);
+  assert.equal(rejected.job.phase, 'watching');
+  assert.equal(rejected.requests.find(r => r.action === 'cloneSubmissionRejected').reason, 'cuda');
+  const unknown = await pageWorkflow({ notice: '需要额外确认费用', noticeKind: 'dialog' });
+  assert.equal(unknown.reselects, 0);
+  assert.equal(unknown.job.phase, 'submitted');
+  assert.equal(unknown.requests.find(r => r.action === 'cloneSubmissionNotice').notice, '需要额外确认费用');
+});
+
+test('worker whitelists attempt-scoped rejections, persists CUDA exclusions and stock cooldowns', async () => {
+  for (const reason of ['cuda', 'stock']) {
+    const store = { cloneMonitorJob: watching() };
+    const w = worker(store);
+    const permit = await w.send('cloneReserve', { id: 'job-1', selected });
+    await w.send('cloneClicked', { id: 'job-1', attemptId: permit.attemptId });
+    const request = { id: 'job-1', adapterVersion: C.VERSION, attemptId: permit.attemptId,
+      candidateId: selected.id, reason, notice: reason === 'cuda' ? cudaNotice : stockNotice };
+    assert.equal((await w.send('cloneSubmissionRejected', { ...request, attemptId: 'stale' })).success, false);
+    assert.equal((await w.send('cloneSubmissionRejected', { ...request, notice: '未知错误' })).success, false);
+    assert.equal((await w.send('cloneSubmissionRejected', request, 8)).success, false);
+    assert.equal((await w.send('cloneSubmissionRejected', request)).success, true);
+    assert.equal(store.cloneMonitorJob.phase, 'watching');
+    assert.equal(store.cloneMonitorJob.attemptId, null);
+    if (reason === 'cuda') assert.ok(store.cloneMonitorJob.excludedHosts.includes(selected.id));
+    else assert.ok(store.cloneMonitorJob.hostCooldowns[selected.id] > Date.now());
+    assert.equal((await worker(store).send('cloneReserve', { id: 'job-1', selected })).success, false);
+    const next = await w.send('cloneReserve', { id: 'job-1', selected: { ...selected, id: 'another-host' } });
+    assert.equal(next.success, true);
+    assert.equal(store.cloneMonitorJob.lastSubmissionNotice, null, 'new attempt must not display a prior rejection as current feedback');
+    assert.equal((await w.send('cloneSubmissionRejected', request)).success, false);
+    assert.equal(store.cloneMonitorJob.attemptId, next.attemptId);
+  }
+});
+
+test('unknown submission feedback is persisted with full bounded text and attempt provenance', async () => {
+  const store = { cloneMonitorJob: watching() }, w = worker(store);
+  const permit = await w.send('cloneReserve', { id: 'job-1', selected });
+  await w.send('cloneClicked', { id: 'job-1', attemptId: permit.attemptId });
+  const notice = '尚未适配的提示：\n' + '排查内容'.repeat(300);
+  await w.send('cloneSubmissionNotice', { id: 'job-1', attemptId: permit.attemptId, notice, noticeKind: 'dialog' });
+  const exported = await w.send('diagnosticRead');
+  const record = exported.log.entries.find(e => e.event === 'submit.feedback');
+  assert.equal(record.details.notice, notice);
+  assert.equal(record.details.attemptId, permit.attemptId);
+  assert.equal(record.details.candidateId, selected.id);
+  assert.equal(record.details.noticeKind, 'dialog');
+  assert.equal(store.cloneMonitorJob.phase, 'submitted');
+});
+
+test('late unknown feedback is observed and old identical toasts cannot hide fresh stock rejection', async () => {
+  const late = await pageWorkflow();
+  await late.emitNotice('延迟返回的新错误：example', 'dialog');
+  assert.equal(late.requests.find(r => r.action === 'cloneSubmissionNotice').notice, '延迟返回的新错误：example');
+  assert.equal(late.job.phase, 'submitted');
+  const old = await pageWorkflow({ preexistingNotice: stockNotice });
+  assert.equal(old.actions.includes('cloneSubmissionRejected'), false);
+  const fresh = await pageWorkflow({ preexistingNotice: stockNotice, notice: stockNotice });
+  assert.ok(fresh.actions.includes('cloneSubmissionRejected'));
+});
+
+test('stock cooldown expires but an observed new instance or unknown rejection never unlocks a request', async () => {
+  const store = { cloneMonitorJob: { ...watching(), hostCooldowns: { [selected.id]: Date.now() - 1 } } };
+  const w = worker(store);
+  const permit = await w.send('cloneReserve', { id: 'job-1', selected });
+  assert.equal(permit.success, true);
+  await w.send('cloneClicked', { id: 'job-1', attemptId: permit.attemptId });
+  const request = { id: 'job-1', adapterVersion: C.VERSION, attemptId: permit.attemptId,
+    candidateId: selected.id, reason: 'stock', notice: stockNotice };
+  store.cloneMonitorJob.newInstanceId = 'already-created';
+  assert.equal((await w.send('cloneSubmissionRejected', request)).success, false);
+  assert.equal(store.cloneMonitorJob.phase, 'submitted');
+  delete store.cloneMonitorJob.newInstanceId;
+  assert.equal((await w.send('cloneSubmissionRejected', { ...request, adapterVersion: 'old' })).success, false);
+  assert.equal((await w.send('cloneSubmissionRejected', { ...request, reason: 'unknown' })).success, false);
 });

@@ -7,15 +7,16 @@
     'pageVersion', 'popupVersion', 'models', 'selectedModels', 'count', 'maxPrice', 'interval',
     'candidateId', 'candidateName', 'selectedModel', 'available', 'cardPrice', 'hourlyQuote',
     'dailyQuote', 'expectedTotal', 'quoteSource', 'rows', 'clicked', 'stockChanged', 'reason',
-    'createdAt', 'updatedAt', 'newInstanceId', 'lastSubmissionNotice']);
-  function redact(value) {
+    'createdAt', 'updatedAt', 'newInstanceId', 'lastSubmissionNotice', 'imageCuda', 'hostCuda', 'incompatibleHosts',
+    'attemptId', 'noticeKind']);
+  function redact(value, limit = 700) {
     return String(value)
       .replace(/https?:\/\/[^\s]+/gi, '[URL]')
       .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[email]')
       .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
       .replace(/\bSCT[a-zA-Z0-9_-]+/g, '[SendKey]')
       .replace(/((?:password|passwd|token|authorization|api[_ -]?key|sendkey|密码)["']?\s*[:=：]\s*["']?)[^\s,;"'}]+/gi, '$1[redacted]')
-      .slice(0, 700);
+      .slice(0, limit);
   }
   function clean(input) {
     const output = {};
@@ -23,7 +24,7 @@
       if (!fields.has(key)) continue;
       if (value === null || typeof value === 'boolean') output[key] = value;
       else if (typeof value === 'number') output[key] = Number.isFinite(value) ? value : null;
-      else if (typeof value === 'string') output[key] = redact(value);
+      else if (typeof value === 'string') output[key] = redact(value, key === 'notice' ? 4000 : 700);
       else if (Array.isArray(value)) output[key] = value.slice(0, 16).filter(v => typeof v === 'string').map(v => redact(v).slice(0, 100));
     }
     return output;

@@ -11,7 +11,7 @@
     $('cloneStatus').textContent = value;
     $('cloneState').dataset.state = phase;
     $('cloneStateTitle').textContent = ({ watching: '监控进行中', submitting: '正在创建实例',
-      submitted: '正在等待开机', success: '克隆开机成功', error: '监控已停止 · 出错',
+      submitted: '正在核实创建结果', success: '克隆开机成功', error: '监控已停止 · 出错',
       uncertain: '需要核实', stopped: '已停止', starting: '正在启动…' }[phase] || '提示');
   }
   function setBusy(active) {
@@ -29,7 +29,8 @@
     if (!response?.success) throw new Error(response?.error || '请刷新克隆页面以加载新版插件');
     if (response.context.adapterVersion !== CloneCore.VERSION) throw new Error('请刷新 AutoDL 克隆页面，以加载新版网页脚本');
     cloneTabId = tab.id;
-    $('cloneSource').textContent = `${response.context.regionName} · ${response.context.sourceId}`;
+    $('cloneSource').textContent = `${response.context.regionName} · ${response.context.sourceId}` +
+      (response.context.imageCuda ? ` · 镜像 CUDA ${response.context.imageCuda}` : '');
     const saved = (await chrome.storage.local.get('cloneSettings')).cloneSettings || {};
     const chosenModels = edited.has('cloneModels') ? Array.from($('cloneModels').selectedOptions).map(e => e.value) : saved.models || [];
     $('cloneModels').replaceChildren(...response.context.models.map(model => {
@@ -51,7 +52,8 @@
     $('cloneUnlock').hidden = !job || !['submitted', 'uncertain'].includes(job.phase);
     if (job) {
       show(job.message, job.phase);
-      if (active) $('cloneSource').textContent = `${job.context.regionName} · ${job.context.sourceId}`;
+      if (active) $('cloneSource').textContent = `${job.context.regionName} · ${job.context.sourceId}` +
+        (job.context.imageCuda ? ` · 镜像 CUDA ${job.context.imageCuda}` : '');
       $('cloneRunDetails').textContent = job.round > 0 ? `已检查 ${job.round} 轮` : '首次检查中';
     } else if (!starting) {
       $('cloneState').hidden = true;

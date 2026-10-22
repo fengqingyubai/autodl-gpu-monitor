@@ -41,18 +41,35 @@
     if (!/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) throw new Error('页面配置费用尚未就绪');
     return Number(amount);
   }
-  function eligible(machine, config) {
+  function cudaVersion(value) {
+    const match = normalize(value).match(/^(\d{1,2})\.(\d{1,2})(?:\.\d+)?$/);
+    return match ? [Number(match[1]), Number(match[2])] : null;
+  }
+  function cudaCompatible(required, supported) {
+    const need = cudaVersion(required), have = cudaVersion(supported);
+    if (!need || !have) return null;
+    return have[0] > need[0] || have[0] === need[0] && have[1] >= need[1];
+  }
+  function cudaRejected(notice) {
+    return /镜像的?\s*CUDA\s*版本高于主机支持的最高\s*CUDA\s*版本/.test(normalize(notice)) &&
+      /无法开机/.test(notice) && /重新选择主机\s*[/／]\s*镜像/.test(notice);
+  }
+  function stockRejected(notice) {
+    return /^(?:错误\s*)?GPU库存发生变更[，,]\s*请刷新后重新选择[。.!！]?$/.test(normalize(notice));
+  }
+  function eligible(machine, config, imageCuda) {
     return !!machine.id && config.models.includes(normalize(machine.model)) &&
       Number.isInteger(machine.available) && machine.available >= config.count &&
       machine.enabled === true && Number.isFinite(machine.price) && machine.price > 0 &&
-      Math.round(machine.price * 100) * config.count <= Math.round(config.maxPrice * 100);
+      Math.round(machine.price * 100) * config.count <= Math.round(config.maxPrice * 100) &&
+      cudaCompatible(imageCuda, machine.cuda) !== false;
   }
   function assertContext(actual, expected) {
     if (actual.sourceId !== expected.sourceId || actual.region !== expected.region || actual.url !== expected.url) {
       throw new Error('源实例、地区或克隆页面参数发生变化，已停止');
     }
   }
-  const api = { VERSION: '1.1.6', normalize, context, options, money, hourlyQuote, eligible, assertContext };
+  const api = { VERSION: '1.1.7', normalize, context, options, money, hourlyQuote, cudaVersion, cudaCompatible, cudaRejected, stockRejected, eligible, assertContext };
   root.CloneCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

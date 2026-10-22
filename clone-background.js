@@ -11,7 +11,8 @@ async function saveCloneJob(job) {
   await diagnosticLog.append('job.state', { jobId: job.id, sourceId: job.context?.sourceId,
     region: job.context?.region, pageVersion: job.context?.adapterVersion,
     phase: job.phase, stage: job.stage, round: job.round, message: job.message,
-    createdAt: job.createdAt, lastSubmissionNotice: job.lastSubmissionNotice },
+    createdAt: job.createdAt, lastSubmissionNotice: job.lastSubmissionNotice, attemptId: job.attemptId,
+    candidateId: job.selected?.id, candidateName: job.selected?.name, imageCuda: job.context?.imageCuda },
     ['error', 'uncertain'].includes(job.phase) ? 'error' : 'info');
   const badge = { watching: ['ON', '#13854b'], submitting: ['…', '#2563eb'], submitted: ['…', '#2563eb'],
     error: ['ERR', '#dc2626'], uncertain: ['!', '#b45309'], success: ['OK', '#13854b'] }[job.phase];
@@ -115,7 +116,7 @@ async function handleCloneMessage(request, sender) {
     return { success: true, job };
   }
   if (request.action === 'cloneDiagnostic') {
-    if (!['scan.result', 'price.check', 'page.error', 'candidate.selected'].includes(request.event)) return { success: false };
+    if (!['scan.result', 'price.check', 'page.error', 'page.feedback', 'candidate.selected', 'submit.clicked'].includes(request.event)) return { success: false };
     await diagnosticLog.append(request.event, { ...request.details, jobId: job.id, pageVersion: request.adapterVersion },
       request.event === 'page.error' ? 'error' : 'info');
     return { success: true };
@@ -124,7 +125,7 @@ async function handleCloneMessage(request, sender) {
   if (request.action === 'cloneClicked') {
     if (job.phase === 'submitting' && request.attemptId === job.attemptId) await saveCloneJob({ ...job, phase: 'submitted',
       clickedAt: Date.now(), submittedAt: Date.now(), message: job.lastSubmissionNotice ?
-        `页面提示：${job.lastSubmissionNotice}；正在核实是否创建成功` : '已提交，正在核实新实例' });
+        `页面提示：${job.lastSubmissionNotice}；请检查页面，创建结果尚未确认` : '已点击创建，正在核实是否生成新实例' });
     return { success: true };
   }
   if (request.action === 'cloneAbortBeforeClick') {
@@ -137,10 +138,29 @@ async function handleCloneMessage(request, sender) {
   }
   if (request.action === 'cloneSubmissionNotice') {
     if (!request.attemptId || request.attemptId !== job.attemptId || !['submitting', 'submitted'].includes(job.phase)) return { success: false };
-    const notice = String(request.notice || '').slice(0, 1000);
-    await saveCloneJob({ ...job, lastSubmissionNotice: notice, message: `页面提示：${notice}；正在核实创建结果` });
-    // Do not guess which page messages guarantee a rejected request. Add verified rejection codes/text
-    // here once captured from AutoDL. Merely seeing no new instance is not proof of rejection.
+    const notice = String(request.notice || '').slice(0, 4000);
+    await diagnosticLog.append('submit.feedback', { jobId: job.id, attemptId: job.attemptId,
+      noticeKind: request.noticeKind, notice, candidateId: job.selected?.id,
+      candidateName: job.selected?.name, imageCuda: job.context.imageCuda, hostCuda: job.selected?.cuda }, 'warn');
+    await saveCloneJob({ ...job, lastSubmissionNotice: notice.slice(0, 1000), message: `页面提示：${notice.slice(0, 1000)}；请检查页面，创建结果尚未确认` });
+    // This records every message. Only the exact validated rejection handler below may unlock it.
+    return { success: true };
+  }
+  if (request.action === 'cloneSubmissionRejected') {
+    const cuda = request.reason === 'cuda' && CloneCore.cudaRejected(request.notice);
+    const stock = request.reason === 'stock' && CloneCore.stockRejected(request.notice);
+    if (request.adapterVersion !== CloneCore.VERSION || !request.attemptId || request.attemptId !== job.attemptId ||
+        !['submitting', 'submitted'].includes(job.phase) || job.newInstanceId ||
+        request.candidateId !== job.selected?.id || !cuda && !stock) return { success: false };
+    const excludedHosts = [...new Set([...(job.excludedHosts || []), ...(cuda ? [job.selected.id] : [])])];
+    if (excludedHosts.length > 1000) return { success: false };
+    const hostCooldowns = Object.fromEntries(Object.entries(job.hostCooldowns || {}).filter(([, until]) => until > Date.now()));
+    if (stock) hostCooldowns[job.selected.id] = Date.now() + 30000;
+    await diagnosticLog.append(`submit.${request.reason}.rejected`, { jobId: job.id, attemptId: job.attemptId, candidateId: job.selected.id,
+      notice: request.notice, imageCuda: job.context.imageCuda, hostCuda: job.selected.cuda }, 'warn');
+    await saveCloneJob({ ...job, phase: 'watching', excludedHosts, hostCooldowns, selected: null, attemptId: null,
+      clickedAt: null, submittedAt: null, lastSubmissionNotice: String(request.notice).slice(0, 1000),
+      message: cuda ? '页面明确拒绝：目标主机 CUDA 不兼容，已跳过，继续监控' : '页面明确拒绝：GPU 库存发生变更，继续监控（该主机暂避 30 秒）' });
     return { success: true };
   }
   if (request.action === 'cloneError') {
@@ -162,12 +182,15 @@ async function handleCloneMessage(request, sender) {
   } else if (request.action === 'cloneReserve') {
     if (job.config.preview === true) throw new Error('旧版预览任务需要重新启动');
     if (!request.selected?.id || !job.config.models.includes(request.selected.model) ||
+        (job.excludedHosts || []).includes(request.selected.id) ||
+        job.hostCooldowns?.[request.selected.id] > Date.now() ||
+        CloneCore.cudaCompatible(job.context.imageCuda, request.selected.cuda) === false ||
         !Number.isFinite(request.selected.total) || !Number.isFinite(request.selected.price) ||
         request.selected.total > job.config.maxPrice || request.selected.total <= 0 ||
         Math.abs(request.selected.total - request.selected.price * job.config.count) > 0.011) throw new Error('提交参数不符合限制');
     const attemptId = crypto.randomUUID();
     await saveCloneJob({ ...job, phase: 'submitting', selected: request.selected, attemptId, clickedAt: null,
-      submittedAt: Date.now(), message: '正在提交创建请求' });
+      submittedAt: Date.now(), lastSubmissionNotice: null, nextCheckAt: null, message: '正在提交创建请求' });
     return { success: true, attemptId };
   }
   return { success: true };
@@ -175,7 +198,7 @@ async function handleCloneMessage(request, sender) {
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
   const actions = ['cloneStatus', 'cloneStart', 'cloneStop', 'cloneUnlock', 'cloneJob', 'clonePermit',
     'cloneProgress', 'cloneRoundComplete', 'cloneReserve', 'cloneClicked', 'cloneError',
-    'cloneAbortBeforeClick', 'cloneSubmissionNotice', 'cloneDiagnostic',
+    'cloneAbortBeforeClick', 'cloneSubmissionNotice', 'cloneSubmissionRejected', 'cloneDiagnostic',
     'diagnosticRead', 'diagnosticClear', 'diagnosticPopup'];
   if (!actions.includes(request.action)) return false;
   // Serialize reserve, stop and progress mutations, including across different tabs.
@@ -209,9 +232,12 @@ chrome.alarms.onAlarm.addListener(async alarm => {
     const matches = instances.filter(instance => !job.baseline.includes(instance.id) &&
       instance.region === job.context.regionName && instance.host === job.selected.name &&
       CloneCore.normalize(instance.spec).startsWith(`${job.selected.model} * ${job.config.count}卡`));
+    await diagnosticLog.append('tracking.snapshot', { jobId: job.id, rows: instances.length,
+      candidateId: job.selected.id, candidateName: job.selected.name,
+      message: `匹配新实例 ${matches.length} 个`, newInstanceId: matches.length === 1 ? matches[0].id : undefined });
     cloneQueue = cloneQueue.then(async () => {
       const latest = await readCloneJob();
-      if (latest?.id !== job.id || !['submitting', 'submitted'].includes(latest.phase)) return;
+      if (latest?.id !== job.id || latest.attemptId !== job.attemptId || !['submitting', 'submitted'].includes(latest.phase)) return;
       if (matches.length === 1) {
         const instance = matches[0];
         if (instance.status.includes('运行中') && !instance.status.includes('无卡')) {
@@ -230,6 +256,9 @@ chrome.alarms.onAlarm.addListener(async alarm => {
       }
     });
     await cloneQueue;
-  } catch (error) { console.error('克隆状态核实失败，将继续只读核实：', error.message); }
+  } catch (error) {
+    await diagnosticLog.append('tracking.error', { message: error.message }, 'error');
+    console.error('克隆状态核实失败，将继续只读核实：', error.message);
+  }
   finally { cloneTracking = false; }
 });
