@@ -26,6 +26,18 @@
     if (!Number.isInteger(interval) || interval < 3 || interval > 3600) throw new Error('检查间隔必须为 3–3600 秒的整数');
     return { models, count, maxPrice, interval };
   }
+  function rentalContext(url) {
+    const parsed = new URL(url);
+    if (parsed.origin !== 'https://www.autodl.com' ||
+        !/^\/create(?:\/[\w-]+){0,4}\/?$/.test(parsed.pathname) ||
+        /^\/create\/pro(?:\/|$)/.test(parsed.pathname)) {
+      throw new Error('请进入 AutoDL 普通容器的“租用新实例”页面（/create）');
+    }
+    if (['id', 'copy_data_disk', 'base_image_uuid', 'private_image_uuid', 'reproduction_uuid'].some(key => parsed.searchParams.has(key))) {
+      throw new Error('新租模式不接受克隆参数，请从“租用新实例”重新进入');
+    }
+    return { mode: 'rent', url: parsed.href };
+  }
   function money(text) {
     const match = normalize(text).match(/[￥¥]\s*([\d,]+(?:\.\d+)?)/);
     return match ? Number(match[1].replace(/,/g, '')) : NaN;
@@ -68,8 +80,11 @@
     if (actual.sourceId !== expected.sourceId || actual.region !== expected.region || actual.url !== expected.url) {
       throw new Error('源实例、地区或克隆页面参数发生变化，已停止');
     }
+    if ((actual.mode || 'clone') !== (expected.mode || 'clone') || actual.imageSelection !== expected.imageSelection) {
+      throw new Error('创建模式或所选镜像发生变化，请重新读取页面并开始监控');
+    }
   }
-  const api = { VERSION: '1.1.7', normalize, context, options, money, hourlyQuote, cudaVersion, cudaCompatible, cudaRejected, stockRejected, eligible, assertContext };
+  const api = { VERSION: '1.2.0', normalize, context, rentalContext, options, money, hourlyQuote, cudaVersion, cudaCompatible, cudaRejected, stockRejected, eligible, assertContext };
   root.CloneCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

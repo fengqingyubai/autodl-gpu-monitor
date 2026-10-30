@@ -19,6 +19,19 @@ test('clone identity requires data disk, exact source/region and official origin
   assert.throws(() => C.assertContext(C.context(url.replace('source-abc', 'other-def')), C.context(url)));
 });
 
+test('rental URLs accept ordinary creation routes and reject Pro, foreign and clone routes', () => {
+  for (const path of ['/create', '/create/', '/create/cq-A1/host123/2/payg']) {
+    assert.equal(C.rentalContext(`https://www.autodl.com${path}`).mode, 'rent');
+  }
+  for (const path of ['/create/pro', '/createInstance', '/cloneInstance', '/create?id=source-abc', '/create?copy_data_disk=1']) {
+    assert.throws(() => C.rentalContext(`https://www.autodl.com${path}`));
+  }
+  assert.throws(() => C.rentalContext('https://other.test/create'));
+  const ctx = { ...C.rentalContext('https://www.autodl.com/create'), region: 'cq-A1', imageSelection: 'PyTorch / 2.5 / 3.12 / CUDA 12.4' };
+  assert.throws(() => C.assertContext({ ...ctx, imageSelection: 'other' }, ctx), /镜像/);
+  assert.throws(() => C.assertContext({ ...ctx, region: 'bj-A1' }, ctx), /地区/);
+});
+
 test('full-instance budget, exact GPU model, stock and disabled host filtering', () => {
   assert.equal(C.eligible(machine, config), true);
   for (const changed of [{ price: 2.01 }, { model: 'RTX 4090D' }, { available: 1 }, { enabled: false },
@@ -37,7 +50,7 @@ test('config rejects missing GPU, CPU, invalid quantity, unbounded budget or rap
   assert.equal('preview' in C.options({ ...config, preview: true }), false);
 });
 
-function worker(store, snapshots = []) {
+function worker(store, snapshots = [], pageContext) {
   let onMessage, alarm;
   const notices = [];
   const sandbox = { console, URL, crypto: require('node:crypto').webcrypto, CloneCore: C,
@@ -54,6 +67,8 @@ function worker(store, snapshots = []) {
       tabs: { create: async () => ({ id: 99 }), remove: async () => {},
         get: async id => ({ id, status: 'complete', url: 'https://www.autodl.com/console/instance/list' }),
         sendMessage: async (id, request) => {
+          if (pageContext && request.action === 'cloneContext') return { success: true, context: pageContext };
+          if (pageContext && request.action === 'cloneRun') return { success: true };
           assert.equal(request.action, 'cloneListSnapshot', 'tracking may only read instance lists');
           return { success: true, instances: snapshots };
         } }
@@ -69,6 +84,50 @@ function watching(preview = false) {
     context: { ...C.context(url), regionName: '重庆A区', dataCenter: 'chongqingDC1' }, baseline: ['source-abc', 'busy-710'] };
 }
 const selected = { id: 'host123', model: 'RTX 4090', name: '123机', price: 1.98, total: 3.96 };
+
+function rentContext() {
+  return { ...C.rentalContext('https://www.autodl.com/create'), region: 'cq-A1', dataCenter: 'chongqingDC1',
+    regionName: '重庆A区', imageSelection: 'PyTorch / 2.5 / 3.12 / CUDA 12.4', imageCuda: '12.4',
+    adapterVersion: C.VERSION, models: ['RTX 4090'] };
+}
+test('rental starts with no source or existing instances and shares the one-shot barrier', async () => {
+  const store = {};
+  const w = worker(store, [], rentContext());
+  const started = await w.send('cloneStart', { tabId: 7, mode: 'rent', config });
+  assert.equal(started.success, true, started.error);
+  const job = store.cloneMonitorJob;
+  assert.equal(job.context.mode, 'rent');
+  assert.deepEqual(Array.from(job.baseline), []);
+  const reserved = await w.send('cloneReserve', { id: job.id, selected });
+  assert.equal(reserved.success, true);
+  const duplicate = await w.send('cloneReserve', { id: job.id, selected });
+  assert.equal(duplicate.success, false);
+  const restarted = await w.send('cloneStart', { tabId: 7, mode: 'rent', config });
+  assert.equal(restarted.success, false);
+  await w.send('cloneStop');
+  assert.equal(store.cloneMonitorJob.phase, 'uncertain');
+});
+test('rental cannot bypass clone mode or start without image configuration', async () => {
+  const ctx = rentContext();
+  const mismatched = await worker({}, [], ctx).send('cloneStart', { tabId: 7, config });
+  assert.equal(mismatched.success, false);
+  const incomplete = await worker({}, [], { ...ctx, imageSelection: '' }).send('cloneStart', { tabId: 7, mode: 'rent', config });
+  assert.equal(incomplete.success, false);
+  const cloneCtx = { ...watching().context, adapterVersion: C.VERSION, models: ['RTX 4090'] };
+  const clone = await worker({}, [], cloneCtx).send('cloneStart', { tabId: 7, config });
+  assert.equal(clone.success, false);
+  assert.match(clone.error, /未找到源实例/);
+});
+test('rental tracking confirms a unique GPU-running instance and sends notifications once', async () => {
+  const job = { ...watching(), phase: 'submitted', context: rentContext(), selected, submittedAt: Date.now() };
+  const store = { cloneMonitorJob: job };
+  const w = worker(store, [{ id: 'new-rental', region: '重庆A区', host: '123机', spec: 'RTX 4090 * 2卡', status: '运行中' }]);
+  await w.tick();
+  await w.tick();
+  assert.equal(store.cloneMonitorJob.phase, 'success');
+  assert.match(store.cloneMonitorJob.message, /新租实例/);
+  assert.equal(w.notices.filter(n => n.email).length, 1);
+});
 test('worker diagnostics export captures page version, price comparison and prior job context', async () => {
   const store = { cloneMonitorJob: watching() };
   const w = worker(store);
@@ -165,6 +224,58 @@ test('instance list reads numeric and letter-prefixed hosts with their regions',
   }
 });
 
+test('instance list accepts an explicit empty account but rejects a page without loaded results', async () => {
+  const { parseHTML } = require('linkedom');
+  for (const empty of [true, false]) {
+    const { document } = parseHTML(`<html><body>${empty ? '<span class="el-table__empty-text">暂无数据</span>' : ''}</body></html>`);
+    let listener;
+    const sandbox = { CloneCore: C, window: {}, document, location: { pathname: '/console/instance/list' },
+      URL, console, setInterval: () => 1, setTimeout: fn => { queueMicrotask(fn); return 1; },
+      chrome: { runtime: { onMessage: { addListener(fn) { listener = fn; } } } } };
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(root, 'clone-page.js'), 'utf8'), sandbox);
+    const response = await new Promise(resolve => listener({ action: 'cloneListSnapshot' }, {}, resolve));
+    assert.equal(response.success, empty);
+    if (empty) assert.equal(response.instances.length, 0);
+    else assert.match(response.error, /未加载/);
+  }
+});
+
+test('rental context requires exactly one region and a complete basic image', () => {
+  const { parseHTML } = require('linkedom');
+  const { document } = parseHTML(`<html><body>
+    <div class="filter-item"><span class="filter-label">选择地区:</span>
+      <label>重庆A区<input type="checkbox" value="cq-A1" checked></label>
+      <label>北京A区<input type="checkbox" value="bj-A1"></label></div>
+    <div class="filter-item"><span class="filter-label">GPU型号:</span>
+      <label><input type="checkbox" value="RTX 4090">RTX 4090</label></div>
+    <div class="card image"><label><input type="radio" value="basicImage" checked>基础镜像</label>
+      <div class="el-cascader"><input value="PyTorch / 2.5 / 3.12 / CUDA 12.4"></div></div>
+  </body></html>`);
+  for (const input of document.querySelectorAll('input')) {
+    Object.defineProperty(input, 'checked', { get: () => input.hasAttribute('checked') });
+    Object.defineProperty(input, 'disabled', { get: () => input.hasAttribute('disabled') });
+  }
+  let listener;
+  const sandbox = { CloneCore: C, window: {}, document, location: { href: 'https://www.autodl.com/create' },
+    URL, console, setInterval: () => 1,
+    chrome: { runtime: { onMessage: { addListener(fn) { listener = fn; } } } } };
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(root, 'clone-page.js'), 'utf8'), sandbox);
+  const read = () => { let result; listener({ action: 'cloneContext' }, {}, value => { result = value; }); return result; };
+  assert.equal(read().success, true);
+  assert.equal(read().context.mode, 'rent');
+  assert.equal(read().context.regionName, '重庆A区');
+  assert.equal(read().context.imageCuda, '12.4');
+  document.querySelector('input[value="bj-A1"]').setAttribute('checked', '');
+  assert.match(read().error, /一个具体地区/);
+  document.querySelector('input[value="bj-A1"]').removeAttribute('checked');
+  document.querySelector('.el-cascader input').value = '';
+  assert.match(read().error, /选好基础镜像/);
+  document.querySelector('input[value="basicImage"]').removeAttribute('checked');
+  assert.match(read().error, /目前支持基础镜像/);
+});
+
 test('DOM adapter reads live-style clone controls, ignores old price and fails on unlocked region', async () => {
   const { parseHTML } = require('linkedom');
   const { document, window } = parseHTML(`<html><body>
@@ -203,6 +314,7 @@ test('DOM adapter reads live-style clone controls, ignores old price and fails o
 });
 
 async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, cancelOnReserve = false, lostOnSelect = false,
+  rent = false, changeImage = false, expandedDisk = false, changeOnPermit,
   imageCuda, hostCuda = '13.0', notice, noticeKind = 'notification', preexistingNotice,
   excludedHosts = [], hostCooldowns = {} } = {}) {
   const { parseHTML } = require('linkedom');
@@ -210,6 +322,8 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
     克隆实例仅能在同一地区内进行，以实例：source-abc的系统创建新实例
     <div class="filter-item"><span class="filter-label">选择地区:</span>
       <label>重庆A区<input type="radio" value="chongqingDC1" checked></label></div>
+    ${rent ? '<div class="card image"><label><input type="radio" value="basicImage" checked>基础镜像</label><div class="el-cascader"><input value="PyTorch / 2.5 / 3.12 / CUDA 12.4"></div></div>' : ''}
+    ${expandedDisk ? '<div class="el-input-number"><input value="50"></div>' : ''}
     <div class="filter-item"><span class="filter-label">GPU型号:</span>
       <label><input type="checkbox" value="RTX 4090" checked>RTX 4090</label></div>
     <div class="filter-item"><span class="filter-label">GPU数量:</span>
@@ -265,10 +379,12 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
   let reloadScheduled = false;
   const job = watching(preview);
   const observers = [];
-  const pageUrl = imageCuda ? `${url}&image_cuda=${imageCuda}` : url;
-  job.context = { ...job.context, ...C.context(pageUrl), imageCuda };
+  const pageUrl = rent ? 'https://www.autodl.com/create' : imageCuda ? `${url}&image_cuda=${imageCuda}` : url;
+  job.context = rent ? { ...C.rentalContext(pageUrl), region: 'chongqingDC1', dataCenter: 'chongqingDC1',
+    regionName: '重庆A区', imageSelection: 'PyTorch / 2.5 / 3.12 / CUDA 12.4', imageCuda: '12.4' } :
+    { ...job.context, ...C.context(pageUrl), imageCuda };
   job.excludedHosts = excludedHosts; job.hostCooldowns = hostCooldowns;
-  const sandbox = { CloneCore: C, window, document, location: { href: pageUrl, pathname: '/cloneInstance', reload() {} },
+  const sandbox = { CloneCore: C, window, document, location: { href: pageUrl, pathname: rent ? '/create' : '/cloneInstance', reload() {} },
     console, URL, crypto: require('node:crypto').webcrypto, Event: window.Event,
     MutationObserver: class { constructor(callback) { this.callback = callback; observers.push(this); }
       observe() { this.active = true; } disconnect() { this.active = false; } }, clearTimeout() {}, setInterval: () => 1,
@@ -278,8 +394,20 @@ async function pageWorkflow({ preview = false, available = 2, quoted = 3.96, can
       requests.push(request);
       if (request.action === 'cloneError') actions.push(request.message);
       if (request.action === 'cloneJob') return { job };
-      if (request.action === 'cloneReserve') { job.phase = cancelOnReserve ? 'stopped' : 'submitting'; job.selected = request.selected; job.attemptId = 'attempt'; return { success: true, attemptId: 'attempt' }; }
-      if (request.action === 'clonePermit') return { success: job.phase === 'submitting' };
+      if (request.action === 'cloneReserve') {
+        job.phase = cancelOnReserve ? 'stopped' : 'submitting'; job.selected = request.selected; job.attemptId = 'attempt';
+        if (changeImage) document.querySelector('.el-cascader input').value = 'PyTorch / 2.6 / 3.12 / CUDA 12.4';
+        return { success: true, attemptId: 'attempt' };
+      }
+      if (request.action === 'clonePermit') {
+        if (changeOnPermit === 'image') document.querySelector('.el-cascader input').value = 'PyTorch / 2.6 / 3.12 / CUDA 12.4';
+        if (changeOnPermit === 'count') document.querySelector('input[value="2"]').removeAttribute('checked');
+        if (changeOnPermit === 'payg') document.querySelector('input[value="payg"]').removeAttribute('checked');
+        if (changeOnPermit === 'disk') {
+          const node = document.createElement('div'); node.className = 'el-input-number'; node.innerHTML = '<input value="50">'; document.body.append(node);
+        }
+        return { success: job.phase === 'submitting' };
+      }
       if (request.action === 'cloneClicked') job.phase = 'submitted';
       if (request.action === 'cloneSubmissionRejected') job.phase = 'watching';
       return { success: true };
@@ -316,13 +444,17 @@ test('hourly quote ignores daily charges, balance and other currency amounts', (
 
 test('UI exposes separate mode menus, an immediate status card and no preview checkbox', () => {
   const { document } = require('linkedom').parseHTML(fs.readFileSync(path.join(root, 'popup.html'), 'utf8'));
-  assert.equal(document.querySelectorAll('[data-panel]').length, 3);
+  assert.equal(document.querySelectorAll('[data-panel]').length, 4);
+  assert.ok(document.querySelector('[data-panel="rent"]'));
   assert.ok(document.querySelector('#clonePanel #cloneStateTitle'));
   assert.ok(document.querySelector('#legacyPanel #statusText'));
   assert.ok(document.querySelector('#notificationsPanel #enableEmailNotify'));
   assert.equal(document.querySelector('#clonePreview'), null);
   const ids = Array.from(document.querySelectorAll('[id]')).map(e => e.id);
   assert.equal(new Set(ids).size, ids.length);
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.version, C.VERSION);
+  assert.ok(manifest.content_scripts.some(script => script.matches.includes('https://www.autodl.com/create') && script.js.includes('clone-page.js')));
 });
 test('page workflow reserves then clicks once, and cancels before click if stopped', async () => {
   const submitted = await pageWorkflow();
@@ -330,6 +462,30 @@ test('page workflow reserves then clicks once, and cancels before click if stopp
   assert.ok(submitted.actions.includes('cloneClicked'));
   const cancelled = await pageWorkflow({ cancelOnReserve: true });
   assert.equal(cancelled.clicks, 0);
+});
+
+test('rental workflow reuses filters and checkout, and refuses changed images or paid disks', async () => {
+  const created = await pageWorkflow({ rent: true });
+  assert.equal(created.clicks, 1, JSON.stringify(created.actions));
+  assert.equal(created.job.context.mode, 'rent');
+  const changed = await pageWorkflow({ rent: true, changeImage: true });
+  assert.equal(changed.clicks, 0);
+  assert.ok(changed.actions.some(a => /镜像发生变化/.test(a)));
+  const disk = await pageWorkflow({ rent: true, expandedDisk: true });
+  assert.equal(disk.clicks, 0);
+  assert.equal(disk.actions.includes('cloneReserve'), false);
+  const costly = await pageWorkflow({ rent: true, quoted: 5 });
+  assert.equal(costly.clicks, 0);
+  assert.equal(costly.actions.includes('cloneReserve'), false);
+});
+
+test('rental revalidates image, count, billing and disk after the final async permit', async () => {
+  for (const changeOnPermit of ['image', 'count', 'payg', 'disk']) {
+    const result = await pageWorkflow({ rent: true, changeOnPermit });
+    assert.equal(result.clicks, 0, changeOnPermit);
+    assert.ok(result.actions.includes('cloneReserve'), changeOnPermit);
+    assert.ok(result.actions.includes('cloneError'), changeOnPermit);
+  }
 });
 
 test('new minimum interval accepts 3 and 9 seconds and rejects malformed input', () => {

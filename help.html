@@ -46,14 +46,14 @@
   <a class="skip" href="#quickstart">跳到正文</a>
   <header>
     <h1>AutoDL GPU 监控 · 使用说明</h1>
-    <p>适用版本 1.1.7 · Edge / Chrome · 更新于 2026-10-22</p>
+    <p>适用版本 1.2.0 · Edge / Chrome · 更新于 2026-10-30</p>
     <p>这份说明随扩展保存在本机，断网也能打开。访问 AutoDL 和发送通知需要联网。</p>
   </header>
   <div class="layout">
     <nav aria-label="使用说明目录">
       <strong>目录</strong>
       <a href="#quickstart">快速开始</a><a href="#install">安装与更新</a>
-      <a href="#modes">选择监控方式</a><a href="#clone">自动克隆</a>
+      <a href="#modes">选择监控方式</a><a href="#rent">新租实例</a><a href="#clone">自动克隆</a>
       <a href="#legacy">原实例开机</a><a href="#status">状态与停止</a>
       <a href="#wechat">微信测试号通知</a><a href="#other-notifications">Server酱与邮箱</a>
       <a href="#logs">诊断日志</a><a href="#faq">常见问题</a><a href="#data">数据与权限</a>
@@ -61,11 +61,12 @@
     <main>
       <section id="quickstart">
         <h2>快速开始</h2>
-        <p>扩展有两种用途：等待已有实例所在主机释放 GPU，或在源实例同地区寻找其他主机，自动克隆数据并开机。</p>
+        <p>扩展支持原实例开机、同地区自动克隆，以及无需源实例的新租实例。</p>
         <ol>
           <li>在安装扩展的同一个浏览器中登录 <a href="https://www.autodl.com/console/instance/list" target="_blank" rel="noopener noreferrer">AutoDL 控制台</a>。</li>
           <li>想换主机找卡：源实例关机后，从“更多 → 克隆实例”进入，勾选数据盘并继续，打开扩展的“自动克隆”。</li>
           <li>只想开启原来的实例：留在实例列表，打开扩展的“原实例开机”，选择要监控的实例。</li>
+          <li>没有源实例：点击“租用新实例”，在网页只选一个地区并选好基础镜像，打开扩展的“新租实例”读取页面并设置条件。</li>
           <li>按需配置“通知设置”，然后开始监控。自动克隆启动后会滚动到顶部显示状态。</li>
           <li>保持电脑、浏览器和 AutoDL 标签页运行。成功后在控制台检查实例、数据及费用。</li>
         </ol>
@@ -94,10 +95,23 @@
         <div class="table-wrap"><table>
           <thead><tr><th>方式</th><th>会做什么</th><th>适合什么情况</th></tr></thead>
           <tbody><tr><td>自动克隆</td><td>在源实例同地区寻找符合条件的其他主机，复制系统盘和数据盘，创建并开机一个新实例。</td><td>原主机长期没卡，接受换主机，想继续使用源环境和数据。</td></tr>
+          <tr><td>新租实例</td><td>使用网页选定的地区和基础镜像，按 GPU 型号、卡数与小时价上限创建一台新实例。</td><td>没有源实例，或希望使用全新环境。</td></tr>
           <tr><td>原实例开机</td><td>监控所选已有实例，在所在主机有可用 GPU 时开机；无卡运行的实例可能被关机后重新带卡启动。</td><td>希望保留原实例、原主机，或不想复制数据。</td></tr></tbody>
         </table></div>
-        <p>两种方式共用通知配置。当前版本会阻止两种监控同时运行；克隆任务结果不明时也会阻止启动原实例监控。切换顶部菜单只是换界面，<strong>不等于停止任务</strong>。</p>
+        <p>三种方式共用通知配置，同一时间只能运行一种监控；创建任务结果不明时也会阻止启动其他监控。切换顶部菜单只是换界面，<strong>不等于停止任务</strong>。</p>
         <p>原实例模式支持多选，所选实例可能依次全部开机并计费。如果只想获得一台可用实例，只选一个。自动克隆每次任务只提交一个新实例。</p>
+      </section>
+      <section id="rent">
+        <h2>新租实例</h2>
+        <ol>
+          <li>在控制台点击“租用新实例”，进入普通容器创建页（/create），只选择一个具体地区。</li>
+          <li>选择“基础镜像”，选完框架、框架版本、Python 和 CUDA。第一版暂不支持 Pro、社区镜像、我的镜像或克隆码。</li>
+          <li>在扩展切到“新租实例”，点击“读取当前新租页”，核对地区和完整镜像。</li>
+          <li>设置 GPU 型号、卡数、所有卡合计的小时价上限、检查间隔（至少 3 秒），点击“开始监控并自动创建”。</li>
+        </ol>
+        <p>无需已有实例，仅按量计费，不复制旧数据，不增加付费数据盘容量。监控期间不要更改地区和镜像，镜像被网站清空时会停止；重新配置后再开始。</p>
+        <p>复用克隆模式的报价校验、一次提交锁、拒绝恢复、结果核实和通知。成功创建一个后停止；结果不明时先检查控制台，再解除锁定。新租与克隆分别保存筛选设置。</p>
+        <p>此模式已核对公开前端代码并通过模拟页面与后台测试，尚未在登录会话中完成真实收费下单验证。控件不匹配时会停止并提示错误。</p>
       </section>
       <section id="clone">
         <h2>自动克隆</h2>
@@ -200,7 +214,7 @@
       </section>
       <section id="other-notifications">
         <h2>Server酱与邮箱通知</h2>
-        <p>通知设置由两种监控共用。可只启用一种，也可以同时启用多个通道；多个通道会分别发送，可能收到重复提醒。通知发送失败不代表开机失败，请以控制台和监控状态为准。</p>
+        <p>通知设置由三种监控共用。可只启用一种，也可以同时启用多个通道；多个通道会分别发送，可能收到重复提醒。通知发送失败不代表开机失败，请以控制台和监控状态为准。</p>
         <h3>Server酱</h3>
         <ol>
           <li>到 <a href="https://sct.ftqq.com/" target="_blank" rel="noopener noreferrer">Server酱官网</a>扫码登录，在其后台绑定接收通道，先用网站的测试功能确认收信。</li>
@@ -260,7 +274,7 @@
         </tbody></table></div>
         <p>打开本说明不读取通知密钥，也不发起监控或收费操作。外部网站链接会在新标签页打开；说明页本身没有外部图片、统计脚本或远程依赖。</p>
       </section>
-      <footer><a href="#quickstart">回到顶部</a> · <a href="https://github.com/txyyt/autodl-gpu-monitor" target="_blank" rel="noopener noreferrer">项目仓库</a> · v1.1.7</footer>
+      <footer><a href="#quickstart">回到顶部</a> · <a href="https://github.com/txyyt/autodl-gpu-monitor" target="_blank" rel="noopener noreferrer">项目仓库</a> · v1.2.0</footer>
     </main>
   </div>
 </body>

@@ -1,4 +1,4 @@
-/* DOM adapter verified against AutoDL's ordinary-instance clone page. */
+/* Shared DOM adapter for ordinary-instance clone and new-rental pages. */
 (() => {
   'use strict';
   if (window.__autodlCloneAdapter) return;
@@ -20,6 +20,8 @@
     return item;
   }
   function pageContext() {
+    const pathname = new URL(location.href).pathname;
+    if (pathname === '/create' || pathname.startsWith('/create/')) return rentalPageContext();
     const ctx = C.context(location.href);
     if (!text(document.body).includes('克隆实例仅能在同一地区内进行') ||
         !text(document.body).includes(`以实例：${ctx.sourceId}的系统创建新实例`)) {
@@ -36,6 +38,31 @@
     const imageCuda = new URL(location.href).searchParams.get('image_cuda');
     return { ...ctx, imageCuda: C.cudaVersion(imageCuda) ? imageCuda : null,
       adapterVersion: C.VERSION, dataCenter: selected[0].value, regionName: text(selected[0].closest('label')), models };
+  }
+  function rentalPageContext() {
+    const ctx = C.rentalContext(location.href);
+    const regionItem = filter('选择地区');
+    const selected = inputs(regionItem, 'checkbox').concat(inputs(regionItem, 'radio'))
+      .filter(e => e.checked && !e.disabled && e.value && e.value !== 'false');
+    if (selected.length !== 1) throw new Error('新租模式请先在网页上只选择一个具体地区，不要选择“全部”');
+    const regionName = text(selected[0].closest('label'));
+    if (!/^.+区$/.test(regionName)) throw new Error('无法识别所选地区，请选择一个具体地区');
+    const image = document.querySelector('.card.image');
+    if (!image?.querySelector('input[value="basicImage"]:checked')) {
+      throw new Error('新租模式目前支持基础镜像，请先在网页选择“基础镜像”及完整版本');
+    }
+    const imageSelection = C.normalize(image.querySelector('.el-cascader input')?.value);
+    // The official basic-image selector has four levels: framework, version, Python, CUDA.
+    const parts = imageSelection.split(/\s*\/\s*/);
+    if (parts.length !== 4 || parts.some(p => !p || /请选择/.test(p))) {
+      throw new Error('请先在网页选好基础镜像的框架、版本、Python 和 CUDA');
+    }
+    const imageCuda = parts[3].match(/(?:CUDA\s*)?(\d{1,2}\.\d{1,2}(?:\.\d+)?)/i)?.[1];
+    if (!imageCuda || !C.cudaVersion(imageCuda)) throw new Error('无法读取基础镜像 CUDA 版本，请检查镜像选择');
+    const models = inputs(filter('GPU型号'), 'checkbox').map(e => e.value).filter(v => !['false', 'CPU'].includes(v));
+    if (!models.length) throw new Error('GPU 型号尚未加载，请等待页面加载完成');
+    return { ...ctx, region: selected[0].value, dataCenter: selected[0].value, regionName,
+      imageSelection, imageCuda, models, adapterVersion: C.VERSION };
   }
   function machines() {
     return Array.from(document.querySelectorAll('.el-table__body tr')).flatMap(row => {
@@ -60,7 +87,7 @@
     }
     const ctx = pageContext();
     C.assertContext(ctx, job.context);
-    if (ctx.dataCenter !== job.context.dataCenter) throw new Error('源地区发生变化');
+    if (ctx.dataCenter !== job.context.dataCenter) throw new Error('所选地区发生变化');
     return ctx;
   }
   async function clickInput(input, job) {
@@ -168,15 +195,31 @@
       throw new Error(`报价核对失败：配置费用 ￥${quoted.toFixed(2)}/小时；单卡 ￥${fresh.price.toFixed(2)} × ${job.config.count}；上限 ￥${job.config.maxPrice.toFixed(2)}/小时`);
     }
     // Paid disk expansion is not included in an hourly GPU cap. Do not silently add daily charges.
+    assertNoPaidDisk();
+    return { id: fresh.id, name: fresh.name, model: fresh.model, price: fresh.price, total: quoted, cuda: fresh.cuda };
+  }
+  function assertNoPaidDisk() {
     const diskInputs = Array.from(document.querySelectorAll('.el-input-number input'));
     if (diskInputs.some(e => !Number.isFinite(Number(e.value)) || Number(e.value) !== 0) ||
         Number(new URL(location.href).searchParams.get('expand_size') || 0) !== 0) {
       throw new Error('检测到付费数据盘扩容，请先处理容量和费用后再监控');
     }
-    return { id: fresh.id, name: fresh.name, model: fresh.model, price: fresh.price, total: quoted, cuda: fresh.cuda };
+  }
+  function assertCheckout(job, selected) {
+    const ctx = pageContext();
+    C.assertContext(ctx, job.context);
+    if (ctx.dataCenter !== job.context.dataCenter) throw new Error('所选地区发生变化');
+    const checked = machines().filter(m => m.radio.checked);
+    const fresh = checked.length === 1 && checked[0].id === selected.id ? checked[0] : null;
+    if (!fresh || !C.eligible(fresh, job.config, job.context.imageCuda) || C.hourlyQuote(document) !== selected.total) {
+      const error = new Error('提交前库存或报价变化，继续监控'); error.stockChanged = true; throw error;
+    }
+    if (Number(inputs(filter('GPU数量'), 'radio').find(e => e.checked)?.value) !== job.config.count ||
+        !document.querySelector('input[type="radio"][value="payg"]')?.checked) throw new Error('卡数或计费模式发生变化');
+    assertNoPaidDisk();
   }
   async function run() {
-    if (busy || location.pathname !== '/cloneInstance') return;
+    if (busy || !['/cloneInstance', '/create'].includes(location.pathname) && !location.pathname.startsWith('/create/')) return;
     busy = true;
     let job, attemptId, clicked = false;
     try {
@@ -221,13 +264,11 @@
       if (!permit?.success) throw new Error(permit?.error || '提交被取消');
       attemptId = permit.attemptId;
       // Recheck the entire selection after awaiting the worker; no automatic confirmation of other dialogs.
-      C.assertContext(pageContext(), job.context);
-      const fresh = machines().find(m => m.id === selected.id && m.radio.checked);
-      if (!fresh || !C.eligible(fresh, job.config, job.context.imageCuda) || C.hourlyQuote(document) !== selected.total) {
-        const error = new Error('提交前库存或报价变化，继续监控'); error.stockChanged = true; throw error;
-      }
+      assertCheckout(job, selected);
       const allowed = await rpc('clonePermit', { id: job.id, attemptId });
       if (!allowed?.success) throw new Error('提交已取消');
+      assertCheckout(job, selected);
+      if (!create[0].isConnected || create[0].disabled || submissionDialogs().length) throw new Error('创建按钮或页面弹窗发生变化，请核实页面后重新开始');
       const inspectSubmission = observeSubmission(job, attemptId);
       clicked = true;
       create[0].click();
@@ -342,6 +383,10 @@
       for (let attempt = 0; attempt < 40; attempt++) {
         rows = Array.from(document.querySelectorAll('.el-table__body tr'));
         if (rows.length && !loading()) break;
+        if (!rows.length && !loading() && /暂无数据|暂无实例/.test(text(document.querySelector('.el-table__empty-text')))) {
+          if (page !== 0) throw new Error('实例列表翻页后为空，无法核实完整列表');
+          return [];
+        }
         await sleep(300);
       }
       if (!rows?.length) throw new Error('实例列表未加载或登录已过期');
@@ -369,7 +414,7 @@
   // Vue may mount after document_idle. Retry readiness without interacting with the page.
   let attempts = 0;
   const ready = setInterval(() => {
-    if (location.pathname !== '/cloneInstance' || ++attempts > 60) { clearInterval(ready); return; }
+    if (!['/cloneInstance', '/create'].includes(location.pathname) && !location.pathname.startsWith('/create/') || ++attempts > 60) { clearInterval(ready); return; }
     try { pageContext(); clearInterval(ready); run(); } catch (_) { /* wait for DOM */ }
   }, 500);
 })();

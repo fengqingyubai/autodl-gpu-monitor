@@ -166,7 +166,7 @@ async function ensureContentScript(tabId) {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "startMonitoring") {
     if (legacyCloneLocked) {
-      sendResponse({ success: false, error: '请先停止克隆任务并核实提交结果' });
+      sendResponse({ success: false, error: '请先停止新租或克隆任务并核实提交结果' });
       return false;
     }
     monitoringEnabled = true;

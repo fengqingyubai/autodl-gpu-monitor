@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AutoDL GPU 自动抢机助手",
-  "version": "1.1.7",
-  "description": "监控实例开机，或按 GPU 型号、数量和价格上限在源地区克隆实例（复制数据盘）",
+  "version": "1.2.0",
+  "description": "监控原实例开机、同地区克隆，或按 GPU 型号、数量和价格上限新租实例",
   "permissions": [
     "storage",
     "notifications",
@@ -32,6 +32,9 @@
     {
       "matches": [
         "https://www.autodl.com/cloneInstance*",
+        "https://www.autodl.com/create",
+        "https://www.autodl.com/create?*",
+        "https://www.autodl.com/create/*",
         "https://www.autodl.com/console/instance/list*"
       ],
       "js": [

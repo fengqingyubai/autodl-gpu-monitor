@@ -9,7 +9,7 @@ const readCloneJob = async () => (await chrome.storage.local.get(CLONE_JOB_KEY))
 async function saveCloneJob(job) {
   await chrome.storage.local.set({ [CLONE_JOB_KEY]: { ...job, updatedAt: Date.now() } });
   await diagnosticLog.append('job.state', { jobId: job.id, sourceId: job.context?.sourceId,
-    region: job.context?.region, pageVersion: job.context?.adapterVersion,
+    region: job.context?.region, mode: job.context?.mode || 'clone', pageVersion: job.context?.adapterVersion,
     phase: job.phase, stage: job.stage, round: job.round, message: job.message,
     createdAt: job.createdAt, lastSubmissionNotice: job.lastSubmissionNotice, attemptId: job.attemptId,
     candidateId: job.selected?.id, candidateName: job.selected?.name, imageCuda: job.context?.imageCuda },
@@ -51,7 +51,7 @@ async function handleCloneMessage(request, sender) {
   let job = await readCloneJob();
   if (request.action === 'diagnosticRead') return { success: true, log: await diagnosticLog.read(),
     exportedAt: new Date().toISOString(), extensionVersion: CloneCore.VERSION,
-    currentJob: cleanDiagnosticDetails({ jobId: job?.id, phase: job?.phase, round: job?.round,
+    currentJob: cleanDiagnosticDetails({ jobId: job?.id, mode: job?.context?.mode || 'clone', phase: job?.phase, round: job?.round,
       pageVersion: job?.context?.adapterVersion, sourceId: job?.context?.sourceId,
       message: job?.message, createdAt: job?.createdAt, updatedAt: job?.updatedAt,
       lastSubmissionNotice: job?.lastSubmissionNotice }) };
@@ -63,21 +63,29 @@ async function handleCloneMessage(request, sender) {
   if (request.action === 'cloneStatus') return { success: true, job };
   if (request.action === 'cloneStart') {
     await diagnosticLog.append('monitor.start.request', { ...request.config, popupVersion: request.popupVersion });
-    if (cloneActive(job)) throw new Error('已有克隆任务，请先停止；已提交的任务需核实后解除锁定');
+    if (cloneActive(job)) throw new Error('已有创建任务，请先停止；已提交的任务需核实后解除锁定');
     if (job?.phase === 'uncertain') throw new Error('上次提交结果未确认，请先核实实例列表并解除提交锁定');
     if (checkInProgress) throw new Error('原开关机操作仍在执行，请稍后再开始克隆');
     const cfg = CloneCore.options(request.config);
     const { context } = await sendClonePage(request.tabId, { action: 'cloneContext' });
+    const mode = context.mode || 'clone';
+    if (!['clone', 'rent'].includes(mode) || (request.mode || 'clone') !== mode) throw new Error('所选模式与当前页面不符，请重新读取页面');
+    if (mode === 'rent') {
+      CloneCore.rentalContext(context.url);
+      if (!context.region || !context.dataCenter || !context.regionName || !context.imageSelection || !CloneCore.cudaVersion(context.imageCuda)) {
+        throw new Error('新租页面缺少地区或基础镜像配置，请重新读取页面');
+      }
+    } else CloneCore.context(context.url);
     await diagnosticLog.append('page.version', { pageVersion: context.adapterVersion, sourceId: context.sourceId, region: context.region });
-    if (context.adapterVersion !== CloneCore.VERSION) throw new Error('AutoDL 页面仍在运行旧版脚本，请刷新克隆页面后重试');
-    if (cfg.models.some(model => !context.models.includes(model))) throw new Error('所选 GPU 型号不属于源实例地区');
+    if (context.adapterVersion !== CloneCore.VERSION) throw new Error('AutoDL 页面仍在运行旧版脚本，请刷新创建页面后重试');
+    if (cfg.models.some(model => !context.models.includes(model))) throw new Error('所选 GPU 型号不属于当前地区');
     stopLegacyMonitor();
     legacyCloneLocked = true;
     let baseline;
     try { baseline = await snapshotInstances(); }
     catch (error) { legacyCloneLocked = false; throw error; }
     const source = baseline.find(instance => instance.id === context.sourceId);
-    if (!source || !source.status.includes('已关机') || source.region !== context.regionName) {
+    if (mode === 'clone' && (!source || !source.status.includes('已关机') || source.region !== context.regionName)) {
       legacyCloneLocked = false;
       if (!source) throw new Error('实例列表中未找到源实例，请核对克隆页面的源实例 ID');
       if (!source.status.includes('已关机')) throw new Error(`源实例尚未关机，读取到的状态：${source.status || '未知'}`);
@@ -87,7 +95,7 @@ async function handleCloneMessage(request, sender) {
     stopLegacyMonitor();
     job = { id: crypto.randomUUID(), phase: 'watching', tabId: request.tabId, context,
       config: cfg, baseline: baseline.map(instance => instance.id), createdAt: Date.now(),
-      round: 0, message: '监控已开启：正在扫描同地区可用主机' };
+      round: 0, message: mode === 'rent' ? '新租监控已开启：正在扫描所选地区可用主机' : '监控已开启：正在扫描同地区可用主机' };
     await saveCloneJob(job);
     await chrome.alarms.create('clone-watchdog', { periodInMinutes: 0.5 });
     await sendClonePage(job.tabId, { action: 'cloneRun' });
@@ -170,7 +178,7 @@ async function handleCloneMessage(request, sender) {
     if (cloneActive(job)) {
       const uncertain = ['submitting', 'submitted'].includes(job.phase);
       await saveCloneJob({ ...job, phase: uncertain ? 'uncertain' : 'error', message: request.message });
-      await cloneNotice('AutoDL 克隆监控已停止', request.message);
+      await cloneNotice('AutoDL 创建监控已停止', request.message);
     }
     return { success: true };
   }
@@ -226,7 +234,7 @@ chrome.alarms.onAlarm.addListener(async alarm => {
         cloneQueue = cloneQueue.then(async () => {
           const latest = await readCloneJob();
           if (latest?.id === job.id && latest.phase === 'watching') await saveCloneJob({ ...latest,
-            phase: 'error', message: '监控页面关闭、退出登录或克隆参数改变，已停止' });
+            phase: 'error', message: '监控页面关闭、退出登录或创建页面参数改变，已停止' });
         });
       }
       return;
@@ -245,8 +253,8 @@ chrome.alarms.onAlarm.addListener(async alarm => {
         const instance = matches[0];
         if (instance.status.includes('运行中') && !instance.status.includes('无卡')) {
           await saveCloneJob({ ...latest, phase: 'success', newInstanceId: instance.id,
-            message: `克隆实例 ${instance.id} 已带 GPU 运行，监控结束` });
-          await cloneNotice('AutoDL 克隆开机成功', `${instance.host}，新实例 ${instance.id}`);
+            message: `${latest.context.mode === 'rent' ? '新租' : '克隆'}实例 ${instance.id} 已带 GPU 运行，监控结束` });
+          await cloneNotice(`AutoDL ${latest.context.mode === 'rent' ? '新租' : '克隆'}开机成功`, `${instance.host}，新实例 ${instance.id}`);
           await sendEmailNotification({ instanceName: `${instance.host} / ${instance.id}`,
             host: instance.host, instanceId: instance.id, spec: instance.spec });
         } else if (/失败|异常/.test(instance.status)) {
@@ -255,7 +263,7 @@ chrome.alarms.onAlarm.addListener(async alarm => {
           message: `新实例 ${instance.id}：${instance.status}；等待 GPU 运行` });
       } else if (Date.now() - latest.submittedAt > 20 * 60 * 1000 || matches.length > 1) {
         await saveCloneJob({ ...latest, phase: 'uncertain', message: '未能唯一确认新实例；请检查控制台后解除锁定，不会自动重试' });
-        await cloneNotice('AutoDL 克隆结果需要核实', '请查看控制台，提交已锁定，不会重复创建');
+        await cloneNotice('AutoDL 创建结果需要核实', '请查看控制台，提交已锁定，不会重复创建');
       }
     });
     await cloneQueue;
